@@ -6,13 +6,6 @@
 #include "PhysicsEngine/AggregateGeom.h"
 #include "RopeSimulatorCPU.generated.h"
 
-UENUM()
-enum class ERopeInitialDistribution : int32
-{
-	PlaneUniform,
-	PlaneRandom,
-};
-
 UCLASS()
 // ANiagaraActorを参考にしている
 class ARopeSimulatorCPU : public AActor
@@ -55,9 +48,6 @@ private:
 	/** Callback when Niagara system finishes. */
 	UFUNCTION(CallInEditor)
 	void OnNiagaraSystemFinished(UNiagaraComponent* FinishedComponent);
-
-	UPROPERTY(EditAnywhere)
-	ERopeInitialDistribution InitialDistribution = ERopeInitialDistribution::PlaneUniform;
 
 	UPROPERTY(EditAnywhere)
 	float MeshScale = 6.0f;
@@ -120,31 +110,7 @@ private:
 	TArray<AActor*> CollisionActors;
 
 	UPROPERTY(EditAnywhere)
-	bool bAutoSpring = false;
-
-	UPROPERTY(EditAnywhere)
-	int32 SpringFrameInterval = 10;
-
-	UPROPERTY(EditAnywhere, Meta=(UIMin = 1, UIMax = 4, ClampMin = 1, ClampMax = 4))
-	int32 NumSpringPlace = 1;
-
-	UFUNCTION(BlueprintCallable)
-	void SpringOneRope(int32 SpringPlaceIdx = 0);
-
-	UPROPERTY(EditAnywhere)
-	float SleepCountTime = 2.0f;
-
-	UPROPERTY(EditAnywhere)
-	float SleepVelocity = 1.0f;
-
-	UPROPERTY(EditAnywhere)
-	float AwakeDistance = 100.0f;
-
-	UPROPERTY(EditAnywhere)
 	TArray<TEnumAsByte<EObjectTypeQuery>> OverlapQueryObjectTypes;
-
-	UPROPERTY(EditAnywhere)
-	bool bHideOnSleeping = false;
 
 	UPROPERTY(EditAnywhere)
 	int32 FadeFrameInterval = 30;
@@ -161,7 +127,6 @@ private:
 	void UpdateActorCollisions();
 	void UpdateCoinBlockers();
 	bool IsCollisioned(const FVector& Position) const;
-	void UpdateSleepState(float DeltaSeconds);
 	void Integrate(int32 ParticleIdx, float SubStepDeltaSeconds);
 	void SolvePositionConstraint(int32 InFrameExeCount);
 	void SolveVelocity(float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
@@ -199,8 +164,6 @@ private:
 	FTransform InvActorTransform = FTransform::Identity;
 	TArray<FKAggregateGeom> PrevActorsAggGeom;
 	TArray<FKAggregateGeom> ActorsAggGeom;
-	int32 SpringRopeIndex = 0;
-	int32 SpringFrameCounter = 0;
 
 	UPROPERTY(Transient)
 	TMap<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> PrevCoinBlockerCollisionsPoseMap;

@@ -41,50 +41,6 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	NotMovingTimes.SetNum(NumRopes);
 	FadeFrameCounters.SetNum(NumRopes);
 
-	// スリープの仕組みを使うか否か。
-	bool bUseSleep = !bAutoSpring && ((InitialDistribution == ERopeInitialDistribution::PlaneUniform) || (InitialDistribution == ERopeInitialDistribution::PlaneRandom));
-
-	switch (InitialDistribution)
-	{
-		case ERopeInitialDistribution::PlaneUniform:
-		{
-			// BoxのXY面をNumRopes個の正方形で分割
-			float Margin = RopeRadius;
-			float UniformSquare = (WallBox.Max.X - WallBox.Min.X - Margin * 2) * (WallBox.Max.Y - WallBox.Min.Y - Margin * 2) / NumRopes;
-			float SquareEdgeLen = FMath::Sqrt(UniformSquare);
-			int32 NumSquareX = floor((WallBox.Max.X - WallBox.Min.X - Margin * 2) / SquareEdgeLen); // はみ出さないようにfloorで
-			int32 NumSquareY = floor((WallBox.Max.Y - WallBox.Min.Y - Margin * 2) / SquareEdgeLen); // はみ出さないようにfloorで
-
-			for (int32 i = 0; i < NumRopes; ++i)
-			{
-				// 正方形分割したもののどの正方形に入れるか決める
-				int32 X = i % NumSquareX;
-				int32 Y = (i / NumSquareX) % NumSquareY;
-				// 決めた正方形の中心位置に配置する
-				Positions[i] = WallBox.Min + FVector(Margin + SquareEdgeLen * (X + 0.5f), Margin + SquareEdgeLen * (Y + 0.5f), 0.0f);
-				// TArrayのコピーはRellocateを発生させるので要素ごとにコピーする
-				InitialPositions[i] = PrevConstraintSolvePositions[i] = PrevPositions[i] = Positions[i];
-			}
-		}
-			break;
-		case ERopeInitialDistribution::PlaneRandom:
-		{
-			float Margin = RopeRadius;
-			for (int32 i = 0; i < NumRopes; ++i)
-			{
-				float X = FMath::RandRange(WallBox.Min.X + Margin, WallBox.Max.X - Margin);
-				float Y = FMath::RandRange(WallBox.Min.Y + Margin, WallBox.Max.Y - Margin);
-				Positions[i] = FVector(X, Y, WallBox.Min.Z);
-
-				// TArrayのコピーはRellocateを発生させるので要素ごとにコピーする
-				InitialPositions[i] = PrevConstraintSolvePositions[i] = PrevPositions[i] = Positions[i];
-			}
-		}
-			break;
-		default:
-			check(false);
-	}
-
 	for (int32 ParticleIdx = 0; ParticleIdx < NumRopes; ++ParticleIdx)
 	{
 		Orientations[ParticleIdx] = PrevOrientations[ParticleIdx] = FQuat::Identity;
@@ -93,17 +49,8 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 		Accelerations[ParticleIdx] = InvActorTransform.TransformVectorNoScale(FVector(0.0f, 0.0f, Gravity));
 
 		Colors[ParticleIdx] = FLinearColor::MakeRandomColor();
-		if (bUseSleep && bHideOnSleeping)
-		{
-			Colors[ParticleIdx].A = 0.0f;
-		}
-		else
-		{
-			Colors[ParticleIdx].A = Opacity;
-		}
 
 		// スリープの仕組みを使うケースでは初期化時は全パーティクルスリープ状態から開始する
-		bSleeps[ParticleIdx] = bUseSleep;
 		NotMovingTimes[ParticleIdx] = 0.0f;
 		FadeFrameCounters[ParticleIdx] = 0;
 	}
@@ -114,7 +61,6 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	// メッシュはシリンダーに固定
 	NiagaraComponent->SetNiagaraVariableInt("Shape", 1);
 	NiagaraComponent->SetNiagaraVariableVec3("MeshScale", FVector(MeshScale, MeshScale, MeshScale * 0.2f) * 2); // 使うメッシュが1x1x1で半径0.5なので2倍にしておく。厚みは幅の0.2倍に
-	NiagaraComponent->SetNiagaraVariableBool("bHideOnSleeping", bHideOnSleeping);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayColor(NiagaraComponent, FName("Colors"), Colors);
@@ -140,49 +86,6 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	PrevActorsAggGeom = ActorsAggGeom;
 }
 
-void ARopeSimulatorCPU::SpringOneRope(int32 SpringPlaceIdx)
-{
-	FVector SpringVelocity = FVector(-WallBox.GetExtent().X, -WallBox.GetExtent().Y, 0.0f);
-	if (SpringPlaceIdx == 1)
-	{
-		SpringVelocity = FVector(-SpringVelocity.X, -SpringVelocity.Y, SpringVelocity.Z);
-	}
-	else if (SpringPlaceIdx == 2)
-	{
-		SpringVelocity = FVector(-SpringVelocity.X, SpringVelocity.Y, SpringVelocity.Z);
-	}
-	else if (SpringPlaceIdx == 3)
-	{
-		SpringVelocity = FVector(SpringVelocity.X, -SpringVelocity.Y, SpringVelocity.Z);
-	}
-
-	FVector SpringPosInWallBox = WallBox.GetExtent() - FVector(RopeRadius);
-	if (SpringPlaceIdx == 1)
-	{
-		SpringPosInWallBox = FVector(-SpringPosInWallBox.X, -SpringPosInWallBox.Y, SpringPosInWallBox.Z);
-	}
-	else if (SpringPlaceIdx == 2)
-	{
-		SpringPosInWallBox = FVector(-SpringPosInWallBox.X, SpringPosInWallBox.Y, SpringPosInWallBox.Z);
-	}
-	else if (SpringPlaceIdx == 3)
-	{
-		SpringPosInWallBox = FVector(SpringPosInWallBox.X, -SpringPosInWallBox.Y, SpringPosInWallBox.Z);
-	}
-
-	bSleeps[SpringRopeIndex] = false;
-	NotMovingTimes[SpringRopeIndex] = 0.0f;
-	Positions[SpringRopeIndex] = WallBox.GetCenter() + SpringPosInWallBox;
-	PrevConstraintSolvePositions[SpringRopeIndex] = PrevPositions[SpringRopeIndex] = Positions[SpringRopeIndex];
-	Orientations[SpringRopeIndex] = PrevOrientations[SpringRopeIndex] = FQuat::FindBetweenNormals(FVector::ZAxisVector, FMath::VRand());
-	Velocities[SpringRopeIndex] = SpringVelocity;
-	PrevConstraintSolveVelocities[SpringRopeIndex] = PrevSolveVelocities[SpringRopeIndex] = Velocities[SpringRopeIndex];
-	// 角速度はとりあえずつけない
-	PrevConstraintSolveAngularVelocities[SpringRopeIndex] = PrevSolveAngularVelocities[SpringRopeIndex] = AngularVelocities[SpringRopeIndex] = FVector::ZeroVector;
-	SpringRopeIndex++;
-	SpringRopeIndex %= NumRopes;
-}
-
 void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -198,25 +101,6 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 
 		UpdateActorCollisions();
 		UpdateCoinBlockers();
-
-		if (bAutoSpring)
-		{
-			// BeginPlay()直後の最初のTick()呼び出しでは湧き出しさせない
-			SpringFrameCounter++;
-			SpringFrameCounter %= SpringFrameInterval;
-			if (SpringFrameCounter == 0)
-			{
-				for (int32 SpringPlaceIdx = 0; SpringPlaceIdx < NumSpringPlace; SpringPlaceIdx++)
-				{
-					SpringOneRope(SpringPlaceIdx);
-				}
-			}
-		}
-		else
-		{
-			// 湧き出しをやるときはスリープ切り替えはしない
-			UpdateSleepState(FixedDeltaSeconds);
-		}
 
 		// Niagara版はParticleAttributeReaderの値がSimStageのイテレーション単位でしか更新されない。
 		// そのため、サブステップを複数にしても、Integrate()で落ちた位置をそのサブステップ回でParticleAttributeReaderから参照できない。
@@ -241,20 +125,8 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 		}
 	}
 
-	// スリープの仕組みを使うか否か。
-	bool bUseSleep = !bAutoSpring && ((InitialDistribution == ERopeInitialDistribution::PlaneUniform) || (InitialDistribution == ERopeInitialDistribution::PlaneRandom));
-
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
-
-	if (bUseSleep && bHideOnSleeping)
-	{
-		for (int32 ParticleIdx = 0; ParticleIdx < NumRopes; ++ParticleIdx)
-		{
-			Colors[ParticleIdx].A = (float)FadeFrameCounters[ParticleIdx] / FadeFrameInterval;
-		}
-		UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayColor(NiagaraComponent, FName("Colors"), Colors);
-	}
 }
 
 bool ARopeSimulatorCPU::IsCollisioned(const FVector& Position) const
@@ -264,7 +136,7 @@ bool ARopeSimulatorCPU::IsCollisioned(const FVector& Position) const
 		const FBox& WorldBoxBound = CollisionActor->GetComponentsBoundingBox(false, false);
 		const FBox& BoxBound = WorldBoxBound.TransformBy(InvActorTransform);
 		// Boxと点のコリジョン判定にするために半径分だけBoxサイズを拡張する
-		const FBox& ExpandedBoxBound = BoxBound.ExpandBy(AwakeDistance + RopeRadius);
+		const FBox& ExpandedBoxBound = BoxBound.ExpandBy(RopeRadius);
 		if (ExpandedBoxBound.IsInsideOrOn(Position))
 		{
 			return true;
@@ -281,7 +153,7 @@ bool ARopeSimulatorCPU::IsCollisioned(const FVector& Position) const
 		const FBox& WorldBoxBound = CollisionPose.Key->Bounds.GetBox();
 		const FBox& BoxBound = WorldBoxBound.TransformBy(InvActorTransform);
 		// Boxと点のコリジョン判定にするために半径分だけBoxサイズを拡張する
-		const FBox& ExpandedBoxBound = BoxBound.ExpandBy(AwakeDistance + RopeRadius);
+		const FBox& ExpandedBoxBound = BoxBound.ExpandBy(RopeRadius);
 		if (ExpandedBoxBound.IsInsideOrOn(Position))
 		{
 			return true;
@@ -289,50 +161,6 @@ bool ARopeSimulatorCPU::IsCollisioned(const FVector& Position) const
 	}
 
 	return false;
-}
-
-void ARopeSimulatorCPU::UpdateSleepState(float DeltaSeconds)
-{
-	for (int32 ParticleIdx = 0; ParticleIdx < NumRopes; ++ParticleIdx)
-	{
-		if (bSleeps[ParticleIdx])
-		{
-			FadeFrameCounters[ParticleIdx] = FMath::Max(0, FadeFrameCounters[ParticleIdx] - 1);
-
-			if (IsCollisioned(Positions[ParticleIdx]))
-			{
-				bSleeps[ParticleIdx] = false;
-				NotMovingTimes[ParticleIdx] = 0.0f;
-			}
-
-			// スリープしたら初期位置に戻す。既に初期位置にあるときはスキップ。
-			if (bSleeps[ParticleIdx]
-				&& (Positions[ParticleIdx] - InitialPositions[ParticleIdx]).SizeSquared() > KINDA_SMALL_NUMBER)
-			{
-				// InitialPositionsにコリジョンがあれば戻さない。なければ戻す。
-				if (!IsCollisioned(InitialPositions[ParticleIdx]))
-				{
-					Positions[ParticleIdx] = PrevPositions[ParticleIdx] = PrevConstraintSolvePositions[ParticleIdx] = InitialPositions[ParticleIdx];
-				}
-			}
-		}
-		else
-		{
-			FadeFrameCounters[ParticleIdx] = FMath::Min(FadeFrameInterval, FadeFrameCounters[ParticleIdx] + 1);
-
-			if (Velocities[ParticleIdx].Size() < SleepVelocity)
-			{
-				NotMovingTimes[ParticleIdx] += DeltaSeconds;
-				if (NotMovingTimes[ParticleIdx] > SleepCountTime)
-				{
-					bSleeps[ParticleIdx] = true;
-					PrevConstraintSolveVelocities[ParticleIdx] = PrevSolveVelocities[ParticleIdx] = Velocities[ParticleIdx] = FVector::ZeroVector;
-					PrevConstraintSolveAngularVelocities[ParticleIdx] = PrevSolveAngularVelocities[ParticleIdx] = AngularVelocities[ParticleIdx] = FVector::ZeroVector;
-					Orientations[ParticleIdx] = PrevOrientations[ParticleIdx] = FQuat::Identity;
-				}
-			}
-		}
-	}
 }
 
 void ARopeSimulatorCPU::UpdateActorCollisions()
@@ -424,11 +252,6 @@ namespace
 
 void ARopeSimulatorCPU::Integrate(int32 ParticleIdx, float SubStepDeltaSeconds)
 {
-	if (bSleeps[ParticleIdx])
-	{
-		return;
-	}
-
 	PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 	Velocities[ParticleIdx] += Accelerations[ParticleIdx] * SubStepDeltaSeconds;
 	Positions[ParticleIdx] += Velocities[ParticleIdx] * SubStepDeltaSeconds;
@@ -453,11 +276,6 @@ void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 		{
 			for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumRopes; ++ParticleIdx)
 			{
-				if (bSleeps[ParticleIdx])
-				{
-					continue;
-				}
-
 				ApplyCollisionActorsConstraint(ParticleIdx, InFrameExeCount);
 				ApplyCoinBlockersCollisionConstraint(ParticleIdx, InFrameExeCount);
 				ApplyWallCollisionConstraint(ParticleIdx);
@@ -500,11 +318,6 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 			{
 				for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumRopes; ++ParticleIdx)
 				{
-					if (bSleeps[ParticleIdx])
-					{
-						continue;
-					}
-
 					if (CollisionRestitution > KINDA_SMALL_NUMBER || CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 					{
 						ApplyCollisionActorsVelocityConstraint(ParticleIdx, DeltaSeconds, SubStepDeltaSeconds, SubStepCount);
