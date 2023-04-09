@@ -22,7 +22,6 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	// 何度も使うのでキャッシュしておく
 	InvActorTransform = GetActorTransform().Inverse();
 
-	InitialPositions.SetNum(NumRopes);
 	Positions.SetNum(NumRopes);
 	PrevPositions.SetNum(NumRopes);
 	PrevConstraintSolvePositions.SetNum(NumRopes);
@@ -37,9 +36,6 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	Colors.SetNum(NumRopes);
 	Accelerations.SetNum(NumRopes);
 	InertiaInvs.SetNum(NumRopes);
-	bSleeps.SetNum(NumRopes);
-	NotMovingTimes.SetNum(NumRopes);
-	FadeFrameCounters.SetNum(NumRopes);
 
 	for (int32 ParticleIdx = 0; ParticleIdx < NumRopes; ++ParticleIdx)
 	{
@@ -51,8 +47,6 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 		Colors[ParticleIdx] = FLinearColor::MakeRandomColor();
 
 		// スリープの仕組みを使うケースでは初期化時は全パーティクルスリープ状態から開始する
-		NotMovingTimes[ParticleIdx] = 0.0f;
-		FadeFrameCounters[ParticleIdx] = 0;
 	}
 
 	// Tick()で設定しても、レベルにNiagaraSystemが最初から配置されていると、初回のスポーンでは配列は初期値を使ってしまい

@@ -140,7 +140,6 @@ private:
 	void ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds);
 
 private:
-	TArray<FVector> InitialPositions;
 	TArray<FVector> Positions;
 	TArray<FVector> PrevPositions;
 	TArray<FVector> PrevConstraintSolvePositions;
@@ -157,9 +156,6 @@ private:
 	// 使いまわしている
 	TArray<FVector> Accelerations;
 	TArray<FMatrix> InertiaInvs;
-	TArray<bool> bSleeps;
-	TArray<float> NotMovingTimes;
-	TArray<int32> FadeFrameCounters;
 	int32 NumThreadParticles = 0;
 	FTransform InvActorTransform = FTransform::Identity;
 	TArray<FKAggregateGeom> PrevActorsAggGeom;
