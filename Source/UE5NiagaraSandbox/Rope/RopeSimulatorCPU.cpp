@@ -773,14 +773,6 @@ void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, f
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
 
-	const FVector& PrevSolveVelocity = PrevSolveVelocities[ParticleIdx];
-	const FVector& PrevConstraintSolveVelocity = PrevConstraintSolveVelocities[ParticleIdx];
-	const FVector& Velocity = Velocities[ParticleIdx];
-	const FVector& Acceleration = Accelerations[ParticleIdx];
-
-	FVector DeltaVelocity = FVector::ZeroVector;
-
-#if 0 // TODO:DiskからSphere形状への変化は後で修正
 	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : CoinBlockerCollisionsPoseMap)
 	{
 		if (CollisionPose.Key == nullptr)
@@ -799,33 +791,27 @@ void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, f
 		const USphereComponent* SphereComp = Cast<const USphereComponent>(CollisionPose.Key.Get());
 		if (SphereComp != nullptr)
 		{
-			const FVector& CollisionCenterProjectedPoint = FVector::PointPlaneProject(CollisionCenter, RopePlane);
-
-			// これは厳密には球への最近接点でない。球がRopeの面の中央部分に接した場合などはRopeの円周部分は
-			// 最近接点にならない。球がRopeより十分大きいという前提での近似になっている。
-			const FVector& ClosestRopePoint = RopeCenter + (CollisionCenterProjectedPoint - RopeCenter).GetSafeNormal() * RopeRadius;
-
-			//TODO: RopeCenterと球のコリジョンをとらなくていい？
-
-			float SphereRadius = SphereComp->GetScaledSphereRadius();
-			if ((ClosestRopePoint - CollisionCenter).SizeSquared() < SphereRadius * SphereRadius)
+			float LimitDistance = RopeRadius + SphereComp->GetScaledSphereRadius();
+			if ((RopeCenter - CollisionCenter).SizeSquared() < LimitDistance * LimitDistance)
 			{
 				const FVector& CollisionVelocity = (Pose.GetLocation() - PrevPose.GetLocation()) / DeltaSeconds;
+				const FVector& PrevSolveRelativeVelocity = PrevSolveVelocities[ParticleIdx] - CollisionVelocity;
+				const FVector& ImpactNormal = (RopeCenter - CollisionCenter).GetSafeNormal();
 
-				FVector ImpactNormal = (RopeCenter - CollisionCenter).GetSafeNormal();
-				if (((ClosestRopePoint - CollisionCenter) | (RopeCenter - CollisionCenter)) < 0.0f)
+				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
+				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
 				{
-					ImpactNormal *= -1;
-				}
-
-				if (CollisionRestitution > KINDA_SMALL_NUMBER)
-				{
-					SolveRestituionDeltaVelocity(RopeCenter, ClosestRopePoint, ImpactNormal, CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, CollisionVelocity, PrevConstraintSolveVelocity, DeltaVelocity);
+					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionVelocity;
+					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
+					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
 				}
 
 				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 				{
-					SolveDynamicFrictionDeltaVelocity(RopeCenter, ClosestRopePoint, ImpactNormal, CollisionDynamicFriction, PrevSolveVelocity, CollisionVelocity, Acceleration, SubStepDeltaSeconds, DeltaVelocity);
+					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
+					float ForceNormalLen = FMath::Abs(Accelerations[ParticleIdx] | ImpactNormal);
+					float PrevSolveRelativeVelocityTangentLen = PrevSolveRelativeVelocityTangent.Size();
+					Velocities[ParticleIdx] -= PrevSolveRelativeVelocityTangent / FMath::Max(PrevSolveRelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * CollisionDynamicFriction * ForceNormalLen, PrevSolveRelativeVelocityTangentLen);
 				}
 			}
 			continue;
@@ -844,44 +830,43 @@ void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, f
 			const FVector& EndPoint = CollisionCenter - ZAxis * HalfHeight;
 			// FMath::PointDistToSegmentSquared()は中でFMath::ClosestPointOnSegment() を呼び出しているので下で2回呼び出すのは無駄なので
 			// FMath::ClosestPointOnSegment()を使う
-			//float DistSquared = FMath::PointDistToSegmentSquared(Positions[ParticleIdx], StartPoint, EndPoint);
-			FVector ClosestPointOnSegment = FMath::ClosestPointOnSegment(RopeCenter, StartPoint, EndPoint);
-			const FVector& ClosestPointOnSegmentProjected = FVector::PointPlaneProject(ClosestPointOnSegment, RopePlane);
-			const FVector& DeepestPenetratePoint = RopeCenter + (ClosestPointOnSegmentProjected - RopeCenter).GetSafeNormal() * RopeRadius;
+			//float DistSquared = FMath::PointDistToSegmentSquared(RopeCenter, StartPoint, EndPoint);
+			const FVector& ClosestPoint = FMath::ClosestPointOnSegment(RopeCenter, StartPoint, EndPoint);
+			float DistSquared = (RopeCenter - ClosestPoint).SizeSquared();
 
-			// 厳密にはこのClosestPointOnSegmentとRopeCenterから計算した上のClosestPointOnSegmentは違うが、
-			// カプセルがRopeと比較してサイズが大きいものとして近似する。
-			ClosestPointOnSegment = FMath::ClosestPointOnSegment(DeepestPenetratePoint, StartPoint, EndPoint);
-			float CapsuleRadius = CapsuleComp->GetScaledCapsuleRadius();
-			if ((ClosestPointOnSegment - DeepestPenetratePoint).SizeSquared() < CapsuleRadius * CapsuleRadius)
+			float LimitDistance = RopeRadius + CapsuleComp->GetScaledCapsuleRadius();
+			if (DistSquared < LimitDistance * LimitDistance)
 			{
 				// インパクトポイントの速度を求める
+				const FVector& ClosestLocalPosition = CapsuleTM.InverseTransformPosition(ClosestPoint);
+				const FVector& CenterToClosestPos = CapsuleTM.GetRotation().RotateVector(ClosestLocalPosition);
 				const FQuat& RotDiff = Pose.GetRotation() * PrevPose.GetRotation().Inverse();
-				const FVector& PrevCenterToDeepestPenetratePoint = RotDiff.UnrotateVector(DeepestPenetratePoint - Pose.GetLocation());
-				const FVector& CollisionImpactPointVelocity = (DeepestPenetratePoint - (PrevPose.GetLocation() + PrevCenterToDeepestPenetratePoint)) / DeltaSeconds;
+				const FVector& PrevCenterToClosestPos = RotDiff.UnrotateVector(CenterToClosestPos);
+				const FVector& CollisionImpactPointVelocity = ((Pose.GetLocation() + CenterToClosestPos) - (PrevPose.GetLocation() + PrevCenterToClosestPos)) / DeltaSeconds;
 
-				FVector ImpactNormal = (DeepestPenetratePoint - ClosestPointOnSegment).GetSafeNormal();
-				if (((ClosestPointOnSegment - DeepestPenetratePoint) | (ClosestPointOnSegment - RopeCenter)) < 0.0f)
-				{
-					ImpactNormal *= -1;
-				}
+				const FVector& PrevSolveRelativeVelocity = PrevSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
 
-				if (CollisionRestitution > KINDA_SMALL_NUMBER)
+				const FVector& ImpactNormal = (RopeCenter - ClosestPoint).GetSafeNormal();
+
+				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
+				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
 				{
-					SolveRestituionDeltaVelocity(RopeCenter, DeepestPenetratePoint, ImpactNormal, CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, CollisionImpactPointVelocity, PrevConstraintSolveVelocity, DeltaVelocity);
+					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
+					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
+					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
 				}
 
 				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 				{
-					SolveDynamicFrictionDeltaVelocity(RopeCenter, DeepestPenetratePoint, ImpactNormal, CollisionDynamicFriction, PrevSolveVelocity, CollisionImpactPointVelocity, Acceleration, SubStepDeltaSeconds, DeltaVelocity);
+					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
+					float ForceNormalLen = FMath::Abs(Accelerations[ParticleIdx] | ImpactNormal);
+					float PrevSolveRelativeVelocityTangentLen = PrevSolveRelativeVelocityTangent.Size();
+					Velocities[ParticleIdx] -= PrevSolveRelativeVelocityTangent / FMath::Max(PrevSolveRelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * CollisionDynamicFriction * ForceNormalLen, PrevSolveRelativeVelocityTangentLen);
 				}
 			}
 			continue;
 		}
 	}
-
-	Velocities[ParticleIdx] += DeltaVelocity;
-#endif
 }
 
 void ARopeSimulatorCPU::CalculateOneWallVelocityConstraint(int32 ParticleIdx, const FPlane& WallPlane, float SubStepDeltaSeconds, FVector& InOutDeltaVelocity)
