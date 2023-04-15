@@ -25,23 +25,15 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	Positions.SetNum(NumRopes);
 	PrevPositions.SetNum(NumRopes);
 	PrevConstraintSolvePositions.SetNum(NumRopes);
-	Orientations.SetNum(NumRopes);
-	PrevOrientations.SetNum(NumRopes);
 	Velocities.SetNum(NumRopes);
-	AngularVelocities.SetNum(NumRopes);
 	PrevConstraintSolveVelocities.SetNum(NumRopes);
 	PrevSolveVelocities.SetNum(NumRopes);
-	PrevConstraintSolveAngularVelocities.SetNum(NumRopes);
-	PrevSolveAngularVelocities.SetNum(NumRopes);
 	Colors.SetNum(NumRopes);
 	Accelerations.SetNum(NumRopes);
-	InertiaInvs.SetNum(NumRopes);
 
 	for (int32 ParticleIdx = 0; ParticleIdx < NumRopes; ++ParticleIdx)
 	{
-		Orientations[ParticleIdx] = PrevOrientations[ParticleIdx] = FQuat::Identity;
 		PrevSolveVelocities[ParticleIdx] = PrevConstraintSolveVelocities[ParticleIdx] = Velocities[ParticleIdx] = FVector::ZeroVector;
-		PrevSolveAngularVelocities[ParticleIdx] = PrevConstraintSolveAngularVelocities[ParticleIdx] = AngularVelocities[ParticleIdx] = FVector::ZeroVector;
 		Accelerations[ParticleIdx] = InvActorTransform.TransformVectorNoScale(FVector(0.0f, 0.0f, Gravity));
 
 		Colors[ParticleIdx] = FLinearColor::MakeRandomColor();
@@ -56,7 +48,8 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	NiagaraComponent->SetNiagaraVariableInt("Shape", 1);
 	NiagaraComponent->SetNiagaraVariableVec3("MeshScale", FVector(MeshScale, MeshScale, MeshScale * 0.2f) * 2); // 使うメッシュが1x1x1で半径0.5なので2倍にしておく。厚みは幅の0.2倍に
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
-	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
+	// TODO:
+	//UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayColor(NiagaraComponent, FName("Colors"), Colors);
 
 	NumThreadParticles = (NumRopes + NumThreads - 1) / NumThreads;
@@ -120,7 +113,8 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 	}
 
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
-	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
+	//TODO:
+	//UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
 }
 
 bool ARopeSimulatorCPU::IsCollisioned(const FVector& Position) const
@@ -231,40 +225,16 @@ void ARopeSimulatorCPU::UpdateCoinBlockers()
 	}
 }
 
-namespace
-{
-	FMatrix CalculateRotatedCylinderIneartiaMoment(float Mass, float Radius, float Height, const FQuat& Orientation)
-	{
-		FMatrix CylinderInertiaMoment = FMatrix::Identity;
-		CylinderInertiaMoment.M[0][0] = CylinderInertiaMoment.M[1][1] = Mass * (Radius * Radius + Height * Height / 3) * 0.25f;
-		CylinderInertiaMoment.M[2][2] = 0.5f * Radius * Radius;
-
-		const FMatrix& OrientationMat = FTransform(Orientation).ToMatrixNoScale();
-		return OrientationMat * CylinderInertiaMoment.Inverse() * OrientationMat.GetTransposed();
-	}
-}
-
 void ARopeSimulatorCPU::Integrate(int32 ParticleIdx, float SubStepDeltaSeconds)
 {
 	PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 	Velocities[ParticleIdx] += Accelerations[ParticleIdx] * SubStepDeltaSeconds;
 	Positions[ParticleIdx] += Velocities[ParticleIdx] * SubStepDeltaSeconds;
 	PrevConstraintSolvePositions[ParticleIdx] = Positions[ParticleIdx];
-
-	// トルク外力を考慮しないので角速度の更新は行わない
-	PrevOrientations[ParticleIdx] = Orientations[ParticleIdx];
-	const FVector& AngularVelocity = AngularVelocities[ParticleIdx];
-	Orientations[ParticleIdx] += FQuat(AngularVelocity.X, AngularVelocity.Y, AngularVelocity.Z, 0.0f) * Orientations[ParticleIdx] * SubStepDeltaSeconds * 0.5f;
-	Orientations[ParticleIdx].Normalize();
 }
 
 void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 {
-	for (int32 ParticleIdx = 0; ParticleIdx < NumRopes; ++ParticleIdx)
-	{
-		InertiaInvs[ParticleIdx] = CalculateRotatedCylinderIneartiaMoment(1.0f, RopeRadius, RopeRadius * 0.4f, Orientations[ParticleIdx]) * (1.0f / InertiaMomentScale);
-	}
-
 	ParallelFor(NumThreads,
 		[this, InFrameExeCount](int32 ThreadIndex)
 		{
@@ -292,17 +262,6 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 		PrevConstraintSolveVelocities[ParticleIdx] = Velocities[ParticleIdx]; // 位置コンストレイントと静止摩擦で位置が修正される前の速度。反発の計算に使う
 		Velocities[ParticleIdx] = (Positions[ParticleIdx] - PrevPositions[ParticleIdx]) * InvSubStepDeltaSeconds;
 		PrevSolveVelocities[ParticleIdx] = Velocities[ParticleIdx]; // 位置コンストレイントと静止摩擦を反映した速度
-
-		PrevConstraintSolveAngularVelocities[ParticleIdx] = AngularVelocities[ParticleIdx]; // 位置コンストレイントと静止摩擦で位置が修正される前の速度。反発の計算に使う
-		const FQuat& RotDiff = Orientations[ParticleIdx] * PrevOrientations[ParticleIdx].Inverse();
-		AngularVelocities[ParticleIdx] = FVector(RotDiff.X, RotDiff.Y, RotDiff.Z) * 2.0f * InvSubStepDeltaSeconds;
-		if (RotDiff.W < 0.0f)
-		{
-			AngularVelocities[ParticleIdx] *= -1;
-		}
-		PrevSolveAngularVelocities[ParticleIdx] = AngularVelocities[ParticleIdx]; // 位置コンストレイントと静止摩擦を反映した速度
-
-		InertiaInvs[ParticleIdx] = CalculateRotatedCylinderIneartiaMoment(1.0f, RopeRadius, RopeRadius * 0.4f, Orientations[ParticleIdx]) * (1.0f / InertiaMomentScale);
 	}
 
 	if (CollisionRestitution > KINDA_SMALL_NUMBER || CollisionDynamicFriction > KINDA_SMALL_NUMBER || WallRestitution > KINDA_SMALL_NUMBER || WallDynamicFriction > KINDA_SMALL_NUMBER)
@@ -368,10 +327,8 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 	float FrameExeAlpha = (InFrameExeCount + 1) / (NumSubStep * NumIteration);
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
-	const FVector& RopeNormal = Orientations[ParticleIdx] * FVector::ZAxisVector;
-	const FPlane& RopePlane = FPlane(RopeCenter, RopeNormal);
-	const FQuat& RopeRot = Orientations[ParticleIdx];
 
+#if 0 // TODO:DiskからSphere形状への変化は後で修正
 	// TODO:コリジョンについても、NeighborGridに入ってるものだけを処理するようにすればコストは減らせる。まあ数がパーティクルほど多くないし複数のセルにまたがるものが多いだろうからやるのも微妙だが
 	// そもそも物理アセット、あるいはプレイヤーのカプセルがこのアクタと交差してなければコリジョン計算の必要すらない。
 	// TODO:現フレームの現イテレーションでのコリジョンの位置と向きを前フレームのポーズでのコリジョン位置と現フレームのポーズでのコリジョン位置から
@@ -412,10 +369,6 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 					DeltaPos = (CollisionCenter - ClosestRopePoint).GetSafeNormal() * (SphereElem.Radius + (CollisionCenter - ClosestRopePoint).Size()) * CollisionProjectionAlpha;
 				}
 				Positions[ParticleIdx] += DeltaPos;
-
-				const FVector& InertiaRotVec = InertiaInvs[ParticleIdx].TransformVector((ClosestRopePoint - RopeCenter) ^ DeltaPos) * CollisionRotProjectionAlpha;
-				const FQuat& InertiaRot = FQuat(InertiaRotVec.X, InertiaRotVec.Y, InertiaRotVec.Z, 0.0f);
-				Orientations[ParticleIdx] += InertiaRot * RopeRot * 0.5f;
 			}
 		}
 
@@ -560,13 +513,6 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 			float CenterProjection = FMath::Max(-SmallestBoxPlane.PlaneDot(RopeCenter) * CollisionProjectionAlpha, 0.0f);
 			const FVector& DeltaPos = CenterProjection * SmallestBoxPlane.GetNormal();
 			Positions[ParticleIdx] += DeltaPos;
-
-			if (SmallestPenetrateDepth - CenterProjection > 0.0f)
-			{
-				const FVector& InertiaRotVec = InertiaInvs[ParticleIdx].TransformVector((SmallestPenetratePoint - RopeCenter) ^ ((SmallestPenetrateDepth - CenterProjection) * SmallestBoxPlane.GetNormal())) * CollisionRotProjectionAlpha;
-				const FQuat& InertiaRot = FQuat(InertiaRotVec.X, InertiaRotVec.Y, InertiaRotVec.Z, 0.0f);
-				Orientations[ParticleIdx] += InertiaRot * RopeRot * 0.5f;
-			}
 		}
 
 		for (int32 j = 0; j < AggGeom.SphylElems.Num(); ++j)
@@ -608,15 +554,10 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 					DeltaPos = (ClosestPointOnSegment - DeepestPenetratePoint).GetSafeNormal() * (SphylElem.Radius + (ClosestPointOnSegment - DeepestPenetratePoint).Size()) * CollisionProjectionAlpha;
 				}
 				Positions[ParticleIdx] += DeltaPos;
-
-				const FVector& InertiaRotVec = InertiaInvs[ParticleIdx].TransformVector((DeepestPenetratePoint - RopeCenter) ^ DeltaPos) * CollisionRotProjectionAlpha;
-				const FQuat& InertiaRot = FQuat(InertiaRotVec.X, InertiaRotVec.Y, InertiaRotVec.Z, 0.0f);
-				Orientations[ParticleIdx] += InertiaRot * RopeRot * 0.5f;
 			}
 		}
 	}
-
-	Orientations[ParticleIdx].Normalize();
+#endif
 }
 
 void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount)
@@ -624,10 +565,8 @@ void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, 
 	float FrameExeAlpha = (InFrameExeCount + 1) / (NumSubStep * NumIteration);
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
-	const FVector& RopeNormal = Orientations[ParticleIdx] * FVector::ZAxisVector;
-	const FPlane& RopePlane = FPlane(RopeCenter, RopeNormal);
-	const FQuat& RopeRot = Orientations[ParticleIdx];
 
+#if 0 // TODO:DiskからSphere形状への変化は後で修正
 	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : CoinBlockerCollisionsPoseMap)
 	{
 		if (CollisionPose.Key == nullptr)
@@ -669,10 +608,6 @@ void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, 
 					DeltaPos = (CollisionCenter - ClosestRopePoint).GetSafeNormal() * (SphereRadius + (CollisionCenter - ClosestRopePoint).Size()) * CollisionProjectionAlpha;
 				}
 				Positions[ParticleIdx] += DeltaPos;
-
-				const FVector& InertiaRotVec = InertiaInvs[ParticleIdx].TransformVector((ClosestRopePoint - RopeCenter) ^ DeltaPos) * CollisionRotProjectionAlpha;
-				const FQuat& InertiaRot = FQuat(InertiaRotVec.X, InertiaRotVec.Y, InertiaRotVec.Z, 0.0f);
-				Orientations[ParticleIdx] += InertiaRot * RopeRot * 0.5f;
 			}
 			continue;
 		}
@@ -715,23 +650,16 @@ void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, 
 					DeltaPos = (ClosestPointOnSegment - DeepestPenetratePoint).GetSafeNormal() * (CapsuleRadius + (ClosestPointOnSegment - DeepestPenetratePoint).Size()) * CollisionProjectionAlpha;
 				}
 				Positions[ParticleIdx] += DeltaPos;
-
-				const FVector& InertiaRotVec = InertiaInvs[ParticleIdx].TransformVector((DeepestPenetratePoint - RopeCenter) ^ DeltaPos) * CollisionRotProjectionAlpha;
-				const FQuat& InertiaRot = FQuat(InertiaRotVec.X, InertiaRotVec.Y, InertiaRotVec.Z, 0.0f);
-				Orientations[ParticleIdx] += InertiaRot * RopeRot * 0.5f;
 			}
 			continue;
 		}
 	}
-
-	Orientations[ParticleIdx].Normalize();
+#endif
 }
 
 void ARopeSimulatorCPU::CalculateOneWallCollisionProjection(int32 ParticleIdx, const FPlane& WallPlane, FVector& InOutDeltaPos, FQuat& InOutDeltaRot)
 {
 	const FVector& RopeCenter = Positions[ParticleIdx];
-	const FVector& RopeNormal = Orientations[ParticleIdx] * FVector::ZAxisVector;
-	const FPlane& RopePlane = FPlane(RopeCenter, RopeNormal);
 
 	float CenterProjection = -WallPlane.PlaneDot(RopeCenter) * WallProjectionAlpha;
 
@@ -746,17 +674,12 @@ void ARopeSimulatorCPU::CalculateOneWallCollisionProjection(int32 ParticleIdx, c
 		CenterProjection = 0.0f;
 	}
 
+#if 0 // TODO:DiskからSphere形状への変化は後で修正
 	FVector DeepestPenetratePoint;
 	float DeepestPenetrateDepth;
 	bool bCollisioned = CalculateRopeToPlaneCollision(RopePlane, RopeCenter, RopeRadius, WallPlane, DeepestPenetratePoint, DeepestPenetrateDepth);
 	DeepestPenetrateDepth *= WallProjectionAlpha;
-
-	if (bCollisioned && (DeepestPenetrateDepth > CenterProjection)) // 後半は必ずtrueになるが一応判定
-	{
-		const FVector& InertiaRotVec = InertiaInvs[ParticleIdx].TransformVector((DeepestPenetratePoint - RopeCenter) ^ ((DeepestPenetrateDepth - CenterProjection) * WallPlane.GetNormal())) * WallRotProjectionAlpha;
-		const FQuat& InertiaRot = FQuat(InertiaRotVec.X, InertiaRotVec.Y, InertiaRotVec.Z, 0.0f);
-		InOutDeltaRot += InertiaRot * Orientations[ParticleIdx] * 0.5f; // 正規化はすべて合計した後で
-	}
+#endif
 }
 
 void ARopeSimulatorCPU::ApplyWallCollisionConstraint(int32 ParticleIdx)
@@ -778,36 +701,33 @@ void ARopeSimulatorCPU::ApplyWallCollisionConstraint(int32 ParticleIdx)
 	CalculateOneWallCollisionProjection(ParticleIdx, FPlane(WallBox.Max, -FVector::YAxisVector), DeltaPos, DeltaRot);
 
 	Positions[ParticleIdx] += DeltaPos;
-	Orientations[ParticleIdx] += DeltaRot;
-	Orientations[ParticleIdx].Normalize();
 }
 
 namespace
 {
-	void SolveRestituionDeltaVelocity(const FVector& RopeCenter, const FVector& DeepestPenetratePoint, const FVector& ImpactNormal, float Restitution, float RestitutionSleepVelocity, const FVector& Velocity, const FVector& AngularVelocity, const FVector& ImpactPointVelocity, const FVector& PrevConstraintSolveVelocity, const FVector& PrevConstraintSolveAngularVelocity, const FMatrix& InertiaInv, FVector& InOutDeltaVelocity, FVector& InOutDeltaAngularVelocity)
+	void SolveRestituionDeltaVelocity(const FVector& RopeCenter, const FVector& DeepestPenetratePoint, const FVector& ImpactNormal, float Restitution, float RestitutionSleepVelocity, const FVector& Velocity, const FVector& ImpactPointVelocity, const FVector& PrevConstraintSolveVelocity, FVector& InOutDeltaVelocity)
 	{
 		const FVector& RopeCenterToDeepestPenetratePoint = DeepestPenetratePoint - RopeCenter;
 
 		// 外積オペレータ^は演算順序が+より優先ではないのに注意
-		const FVector& DeepestPenetratePointRelativeVelocity = Velocity + (AngularVelocity ^ RopeCenterToDeepestPenetratePoint) - ImpactPointVelocity;
+		const FVector& DeepestPenetratePointRelativeVelocity = Velocity - ImpactPointVelocity;
 		float RelativeVelocityNormal = DeepestPenetratePointRelativeVelocity | ImpactNormal;
 		if (FMath::Abs(RelativeVelocityNormal) > RestitutionSleepVelocity)
 		{
-			const FVector& DeepestPenetratePointPrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocity + (PrevConstraintSolveAngularVelocity ^ RopeCenterToDeepestPenetratePoint) - ImpactPointVelocity;
+			const FVector& DeepestPenetratePointPrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocity - ImpactPointVelocity;
 			float PrevConstraintSolveRelativeVelocityNormal = DeepestPenetratePointPrevConstraintSolveRelativeVelocity | ImpactNormal;
 			const FVector& DeltaVelocity = ImpactNormal * (-RelativeVelocityNormal + FMath::Max(-Restitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
 
 			InOutDeltaVelocity += DeltaVelocity;
-			InOutDeltaAngularVelocity += InertiaInv.TransformVector(RopeCenterToDeepestPenetratePoint ^ DeltaVelocity);
 		}
 	}
 
-	void SolveDynamicFrictionDeltaVelocity(const FVector& RopeCenter, const FVector& DeepestPenetratePoint, const FVector& ImpactNormal, float WallDynamicFriction, const FVector& Velocity, const FVector& AngularVelocity, const FVector& ImpactPointVelocity, const FVector& Acceleration, const FMatrix& InertiaInv, float SubStepDeltaSeconds, FVector& InOutDeltaVelocity, FVector& InOutDeltaAngularVelocity)
+	void SolveDynamicFrictionDeltaVelocity(const FVector& RopeCenter, const FVector& DeepestPenetratePoint, const FVector& ImpactNormal, float WallDynamicFriction, const FVector& Velocity, const FVector& ImpactPointVelocity, const FVector& Acceleration, float SubStepDeltaSeconds, FVector& InOutDeltaVelocity)
 	{
 		const FVector& RopeCenterToDeepestPenetratePoint = DeepestPenetratePoint - RopeCenter;
 
 		// 外積オペレータ^は演算順序が+より優先ではないのに注意
-		const FVector& DeepestPenetratePointRelativeVelocity = Velocity + (AngularVelocity ^ RopeCenterToDeepestPenetratePoint) - ImpactPointVelocity;
+		const FVector& DeepestPenetratePointRelativeVelocity = Velocity - ImpactPointVelocity;
 		float RelativeVelocityNormal = DeepestPenetratePointRelativeVelocity | ImpactNormal;
 
 		const FVector& RelativeVelocityTangent = Velocity - RelativeVelocityNormal * ImpactNormal;
@@ -816,7 +736,6 @@ namespace
 		const FVector& DeltaVelocity = -RelativeVelocityTangent / FMath::Max(RelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * WallDynamicFriction * ForceNormalLen, RelativeVelocityTangentLen);
 
 		InOutDeltaVelocity += DeltaVelocity;
-		InOutDeltaAngularVelocity += InertiaInv.TransformVector((DeepestPenetratePoint - RopeCenter) ^ DeltaVelocity);
 	}
 }
 
@@ -826,21 +745,15 @@ void ARopeSimulatorCPU::ApplyCollisionActorsVelocityConstraint(int32 ParticleIdx
 	float SubStepAlpha = (SubStepCount + 1) / NumSubStep;
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
-	const FVector& RopeNormal = Orientations[ParticleIdx] * FVector::ZAxisVector;
-	const FPlane& RopePlane = FPlane(RopeCenter, RopeNormal);
 
 	const FVector& PrevSolveVelocity = PrevSolveVelocities[ParticleIdx];
-	const FVector& PrevSolveAngularVelocity = PrevSolveAngularVelocities[ParticleIdx];
 	const FVector& PrevConstraintSolveVelocity = PrevConstraintSolveVelocities[ParticleIdx];
-	const FVector& PrevConstraintSolveAngularVelocity = PrevConstraintSolveAngularVelocities[ParticleIdx];
 	const FVector& Velocity = Velocities[ParticleIdx];
-	const FVector& AngularVelocity = AngularVelocities[ParticleIdx];
 	const FVector& Acceleration = Accelerations[ParticleIdx];
-	const FMatrix& InertiaInv = InertiaInvs[ParticleIdx];
 
 	FVector DeltaVelocity = FVector::ZeroVector;
-	FVector DeltaAngularVelocity = FVector::ZeroVector;
 
+#if 0 // TODO:DiskからSphere形状への変化は後で修正
 	// TODO:コリジョンについても、NeighborGridに入ってるものだけを処理するようにすればコストは減らせる。まあ数がパーティクルほど多くないし複数のセルにまたがるものが多いだろうからやるのも微妙だが
 	// そもそも物理アセット、あるいはプレイヤーのカプセルがこのアクタと交差してなければコリジョン計算の必要すらない。
 	// TODO:現フレームの現イテレーションでのコリジョンの位置と向きを前フレームのポーズでのコリジョン位置と現フレームのポーズでのコリジョン位置から
@@ -879,12 +792,12 @@ void ARopeSimulatorCPU::ApplyCollisionActorsVelocityConstraint(int32 ParticleIdx
 
 				if (CollisionRestitution > KINDA_SMALL_NUMBER)
 				{
-					SolveRestituionDeltaVelocity(RopeCenter, ClosestRopePoint, ImpactNormal, CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, PrevSolveAngularVelocity, CollisionVelocity, PrevConstraintSolveVelocity, PrevConstraintSolveAngularVelocity, InertiaInv, DeltaVelocity, DeltaAngularVelocity);
+					SolveRestituionDeltaVelocity(RopeCenter, ClosestRopePoint, ImpactNormal, CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, CollisionVelocity, PrevConstraintSolveVelocity, DeltaVelocity);
 				}
 
 				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 				{
-					SolveDynamicFrictionDeltaVelocity(RopeCenter, ClosestRopePoint, ImpactNormal, CollisionDynamicFriction, PrevSolveVelocity, PrevSolveAngularVelocity, CollisionVelocity, Acceleration, InertiaInv, SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
+					SolveDynamicFrictionDeltaVelocity(RopeCenter, ClosestRopePoint, ImpactNormal, CollisionDynamicFriction, PrevSolveVelocity, CollisionVelocity, Acceleration, SubStepDeltaSeconds, DeltaVelocity);
 				}
 			}
 		}
@@ -1026,12 +939,12 @@ void ARopeSimulatorCPU::ApplyCollisionActorsVelocityConstraint(int32 ParticleIdx
 
 			if (CollisionRestitution > KINDA_SMALL_NUMBER)
 			{
-				SolveRestituionDeltaVelocity(RopeCenter, SmallestPenetratePoint, SmallestBoxPlane.GetNormal(), CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, PrevSolveAngularVelocity, CollisionImpactPointVelocity, PrevConstraintSolveVelocity, PrevConstraintSolveAngularVelocity, InertiaInv, DeltaVelocity, DeltaAngularVelocity);
+				SolveRestituionDeltaVelocity(RopeCenter, SmallestPenetratePoint, SmallestBoxPlane.GetNormal(), CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, CollisionImpactPointVelocity, PrevConstraintSolveVelocity, DeltaVelocity);
 			}
 
 			if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 			{
-				SolveDynamicFrictionDeltaVelocity(RopeCenter, SmallestPenetratePoint, SmallestBoxPlane.GetNormal(), CollisionDynamicFriction, PrevSolveVelocity, PrevSolveAngularVelocity, CollisionImpactPointVelocity, Acceleration, InertiaInv, SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
+				SolveDynamicFrictionDeltaVelocity(RopeCenter, SmallestPenetratePoint, SmallestBoxPlane.GetNormal(), CollisionDynamicFriction, PrevSolveVelocity, CollisionImpactPointVelocity, Acceleration, SubStepDeltaSeconds, DeltaVelocity);
 			}
 		}
 
@@ -1075,19 +988,19 @@ void ARopeSimulatorCPU::ApplyCollisionActorsVelocityConstraint(int32 ParticleIdx
 
 				if (CollisionRestitution > KINDA_SMALL_NUMBER)
 				{
-					SolveRestituionDeltaVelocity(RopeCenter, DeepestPenetratePoint, ImpactNormal, CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, PrevSolveAngularVelocity, CollisionImpactPointVelocity, PrevConstraintSolveVelocity, PrevConstraintSolveAngularVelocity, InertiaInv, DeltaVelocity, DeltaAngularVelocity);
+					SolveRestituionDeltaVelocity(RopeCenter, DeepestPenetratePoint, ImpactNormal, CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, CollisionImpactPointVelocity, PrevConstraintSolveVelocity, DeltaVelocity);
 				}
 
 				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 				{
-					SolveDynamicFrictionDeltaVelocity(RopeCenter, DeepestPenetratePoint, ImpactNormal, CollisionDynamicFriction, PrevSolveVelocity, PrevSolveAngularVelocity, CollisionImpactPointVelocity, Acceleration, InertiaInv, SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
+					SolveDynamicFrictionDeltaVelocity(RopeCenter, DeepestPenetratePoint, ImpactNormal, CollisionDynamicFriction, PrevSolveVelocity, CollisionImpactPointVelocity, Acceleration, SubStepDeltaSeconds, DeltaVelocity);
 				}
 			}
 		}
 	}
 
 	Velocities[ParticleIdx] += DeltaVelocity;
-	AngularVelocities[ParticleIdx] += DeltaAngularVelocity;
+#endif
 }
 
 void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount)
@@ -1096,21 +1009,15 @@ void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, f
 	float SubStepAlpha = (SubStepCount + 1) / NumSubStep;
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
-	const FVector& RopeNormal = Orientations[ParticleIdx] * FVector::ZAxisVector;
-	const FPlane& RopePlane = FPlane(RopeCenter, RopeNormal);
 
 	const FVector& PrevSolveVelocity = PrevSolveVelocities[ParticleIdx];
-	const FVector& PrevSolveAngularVelocity = PrevSolveAngularVelocities[ParticleIdx];
 	const FVector& PrevConstraintSolveVelocity = PrevConstraintSolveVelocities[ParticleIdx];
-	const FVector& PrevConstraintSolveAngularVelocity = PrevConstraintSolveAngularVelocities[ParticleIdx];
 	const FVector& Velocity = Velocities[ParticleIdx];
-	const FVector& AngularVelocity = AngularVelocities[ParticleIdx];
 	const FVector& Acceleration = Accelerations[ParticleIdx];
-	const FMatrix& InertiaInv = InertiaInvs[ParticleIdx];
 
 	FVector DeltaVelocity = FVector::ZeroVector;
-	FVector DeltaAngularVelocity = FVector::ZeroVector;
 
+#if 0 // TODO:DiskからSphere形状への変化は後で修正
 	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : CoinBlockerCollisionsPoseMap)
 	{
 		if (CollisionPose.Key == nullptr)
@@ -1150,12 +1057,12 @@ void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, f
 
 				if (CollisionRestitution > KINDA_SMALL_NUMBER)
 				{
-					SolveRestituionDeltaVelocity(RopeCenter, ClosestRopePoint, ImpactNormal, CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, PrevSolveAngularVelocity, CollisionVelocity, PrevConstraintSolveVelocity, PrevConstraintSolveAngularVelocity, InertiaInv, DeltaVelocity, DeltaAngularVelocity);
+					SolveRestituionDeltaVelocity(RopeCenter, ClosestRopePoint, ImpactNormal, CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, CollisionVelocity, PrevConstraintSolveVelocity, DeltaVelocity);
 				}
 
 				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 				{
-					SolveDynamicFrictionDeltaVelocity(RopeCenter, ClosestRopePoint, ImpactNormal, CollisionDynamicFriction, PrevSolveVelocity, PrevSolveAngularVelocity, CollisionVelocity, Acceleration, InertiaInv, SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
+					SolveDynamicFrictionDeltaVelocity(RopeCenter, ClosestRopePoint, ImpactNormal, CollisionDynamicFriction, PrevSolveVelocity, CollisionVelocity, Acceleration, SubStepDeltaSeconds, DeltaVelocity);
 				}
 			}
 			continue;
@@ -1198,12 +1105,12 @@ void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, f
 
 				if (CollisionRestitution > KINDA_SMALL_NUMBER)
 				{
-					SolveRestituionDeltaVelocity(RopeCenter, DeepestPenetratePoint, ImpactNormal, CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, PrevSolveAngularVelocity, CollisionImpactPointVelocity, PrevConstraintSolveVelocity, PrevConstraintSolveAngularVelocity, InertiaInv, DeltaVelocity, DeltaAngularVelocity);
+					SolveRestituionDeltaVelocity(RopeCenter, DeepestPenetratePoint, ImpactNormal, CollisionRestitution, RestitutionSleepVelocity, PrevSolveVelocity, CollisionImpactPointVelocity, PrevConstraintSolveVelocity, DeltaVelocity);
 				}
 
 				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 				{
-					SolveDynamicFrictionDeltaVelocity(RopeCenter, DeepestPenetratePoint, ImpactNormal, CollisionDynamicFriction, PrevSolveVelocity, PrevSolveAngularVelocity, CollisionImpactPointVelocity, Acceleration, InertiaInv, SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
+					SolveDynamicFrictionDeltaVelocity(RopeCenter, DeepestPenetratePoint, ImpactNormal, CollisionDynamicFriction, PrevSolveVelocity, CollisionImpactPointVelocity, Acceleration, SubStepDeltaSeconds, DeltaVelocity);
 				}
 			}
 			continue;
@@ -1211,24 +1118,20 @@ void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, f
 	}
 
 	Velocities[ParticleIdx] += DeltaVelocity;
-	AngularVelocities[ParticleIdx] += DeltaAngularVelocity;
+#endif
 }
 
-void ARopeSimulatorCPU::CalculateOneWallVelocityConstraint(int32 ParticleIdx, const FPlane& WallPlane, float SubStepDeltaSeconds, FVector& InOutDeltaVelocity, FVector& InOutDeltaAngularVelocity)
+void ARopeSimulatorCPU::CalculateOneWallVelocityConstraint(int32 ParticleIdx, const FPlane& WallPlane, float SubStepDeltaSeconds, FVector& InOutDeltaVelocity)
 {
 	const FVector& RopeCenter = Positions[ParticleIdx];
-	const FVector& RopeNormal = Orientations[ParticleIdx] * FVector::ZAxisVector;
-	const FPlane& RopePlane = FPlane(RopeCenter, RopeNormal);
 
 	const FVector& PrevConstraintSolveVelocity = PrevConstraintSolveVelocities[ParticleIdx];
-	const FVector& PrevConstraintSolveAngularVelocity = PrevConstraintSolveAngularVelocities[ParticleIdx];
 	const FVector& Velocity = Velocities[ParticleIdx];
-	const FVector& AngularVelocity = AngularVelocities[ParticleIdx];
 	const FVector& Acceleration = Accelerations[ParticleIdx];
-	const FMatrix& InertiaInv = InertiaInvs[ParticleIdx];
 
 	float RestitutionSleepVelocity = 2.0f * FMath::Abs(Gravity) * SubStepDeltaSeconds;
 
+#if 0 // TODO:DiskからSphere形状への変化は後で修正
 	FVector DeepestPenetratePoint;
 	float DeepestPenetrateDepth;
 	bool bCollisioned = CalculateRopeToPlaneCollision(RopePlane, RopeCenter, RopeRadius, WallPlane, DeepestPenetratePoint, DeepestPenetrateDepth);
@@ -1236,36 +1139,33 @@ void ARopeSimulatorCPU::CalculateOneWallVelocityConstraint(int32 ParticleIdx, co
 	{
 		if (WallRestitution > KINDA_SMALL_NUMBER)
 		{
-			SolveRestituionDeltaVelocity(RopeCenter, DeepestPenetratePoint, WallPlane.GetNormal(), WallRestitution, RestitutionSleepVelocity, Velocity, AngularVelocity, FVector::ZeroVector, PrevConstraintSolveVelocity, PrevConstraintSolveAngularVelocity, InertiaInv, InOutDeltaVelocity, InOutDeltaAngularVelocity);
+			SolveRestituionDeltaVelocity(RopeCenter, DeepestPenetratePoint, WallPlane.GetNormal(), WallRestitution, RestitutionSleepVelocity, Velocity, FVector::ZeroVector, PrevConstraintSolveVelocity, InOutDeltaVelocity);
 		}
 
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
 		{
-			SolveDynamicFrictionDeltaVelocity(RopeCenter, DeepestPenetratePoint, WallPlane.GetNormal(), WallDynamicFriction, Velocity, AngularVelocity, FVector::ZeroVector, Acceleration, InertiaInv, SubStepDeltaSeconds, InOutDeltaVelocity, InOutDeltaAngularVelocity);
+			SolveDynamicFrictionDeltaVelocity(RopeCenter, DeepestPenetratePoint, WallPlane.GetNormal(), WallDynamicFriction, Velocity, FVector::ZeroVector, Acceleration, SubStepDeltaSeconds, InOutDeltaVelocity);
 		}
 	}
+#endif
 }
 
 void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds)
 {
 	FVector DeltaVelocity = FVector::ZeroVector;
-	FVector DeltaAngularVelocity = FVector::ZeroVector;
 
 	// MinZ
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Min, FVector::ZAxisVector), SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
-	// MaxZ
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Max, -FVector::ZAxisVector), SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
+	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Max, -FVector::ZAxisVector), SubStepDeltaSeconds, DeltaVelocity);
 	// MinX
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Min, FVector::XAxisVector), SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
+	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Min, FVector::XAxisVector), SubStepDeltaSeconds, DeltaVelocity);
 	// MaxX
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Max, -FVector::XAxisVector), SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
+	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Max, -FVector::XAxisVector), SubStepDeltaSeconds, DeltaVelocity);
 	// MinY
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Min, FVector::YAxisVector), SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
+	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Min, FVector::YAxisVector), SubStepDeltaSeconds, DeltaVelocity);
 	// MaxY
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Max, -FVector::YAxisVector), SubStepDeltaSeconds, DeltaVelocity, DeltaAngularVelocity);
+	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Max, -FVector::YAxisVector), SubStepDeltaSeconds, DeltaVelocity);
 
 	Velocities[ParticleIdx] += DeltaVelocity;
-	AngularVelocities[ParticleIdx] += DeltaAngularVelocity;
 }
 
 ARopeSimulatorCPU::ARopeSimulatorCPU()

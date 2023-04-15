@@ -53,16 +53,10 @@ private:
 	float MeshScale = 6.0f;
 
 	UPROPERTY(EditAnywhere)
-	float Opacity = 1.0f;
-
-	UPROPERTY(EditAnywhere)
 	float RopeRadius = 1.0f;
 
 	UPROPERTY(EditAnywhere)
 	float Gravity = -981.0f;
-
-	UPROPERTY(EditAnywhere)
-	float InertiaMomentScale = 1.0f;
 
 	UPROPERTY(EditAnywhere)
 	int32 NumThreads = 4;
@@ -136,21 +130,16 @@ private:
 	void ApplyWallCollisionConstraint(int32 ParticleIdx);
 	void ApplyCollisionActorsVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
 	void ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
-	void CalculateOneWallVelocityConstraint(int32 ParticleIdx, const FPlane& WallPlane, float SubStepDeltaSeconds, FVector& InOutDeltaPos, FVector& InOutDeltaRot);
+	void CalculateOneWallVelocityConstraint(int32 ParticleIdx, const FPlane& WallPlane, float SubStepDeltaSeconds, FVector& InOutDeltaPos);
 	void ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds);
 
 private:
 	TArray<FVector> Positions;
 	TArray<FVector> PrevPositions;
 	TArray<FVector> PrevConstraintSolvePositions;
-	TArray<FQuat> Orientations;
-	TArray<FQuat> PrevOrientations;
 	TArray<FVector> Velocities;
-	TArray<FVector> AngularVelocities;
 	TArray<FVector> PrevConstraintSolveVelocities;
 	TArray<FVector> PrevSolveVelocities;
-	TArray<FVector> PrevConstraintSolveAngularVelocities;
-	TArray<FVector> PrevSolveAngularVelocities;
 	TArray<FLinearColor> Colors;
 	// 加速度と慣性モーメントは毎フレーム計算するのでフレーム間のひきつぎはないのだが、使用メモリやTArrayの生成負荷をおさえるために
 	// 使いまわしている
