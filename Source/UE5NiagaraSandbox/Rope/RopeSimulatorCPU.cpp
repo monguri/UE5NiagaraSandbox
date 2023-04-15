@@ -46,7 +46,7 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	NiagaraComponent->SetNiagaraVariableInt("NumParticles", NumRopes);
 	// メッシュはシリンダーに固定
 	NiagaraComponent->SetNiagaraVariableInt("Shape", 1);
-	NiagaraComponent->SetNiagaraVariableVec3("MeshScale", FVector(MeshScale, MeshScale, MeshScale * 0.2f) * 2); // 使うメッシュが1x1x1で半径0.5なので2倍にしておく。厚みは幅の0.2倍に
+	NiagaraComponent->SetNiagaraVariableVec3("MeshScale", FVector(MeshScale)); // 使うメッシュが1x1x1で半径0.5なので2倍にしておく。厚みは幅の0.2倍に
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
 	// TODO:
 	//UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
