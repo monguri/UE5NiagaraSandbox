@@ -126,11 +126,9 @@ private:
 	void SolveVelocity(float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
 	void ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 InFrameExeCount);
 	void ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount);
-	void CalculateOneWallCollisionProjection(int32 ParticleIdx, const FPlane& WallPlane, FVector& InOutDeltaPos, FQuat& InOutDeltaRot);
 	void ApplyWallCollisionConstraint(int32 ParticleIdx);
 	void ApplyCollisionActorsVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
 	void ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
-	void CalculateOneWallVelocityConstraint(int32 ParticleIdx, const FPlane& WallPlane, float SubStepDeltaSeconds, FVector& InOutDeltaPos);
 	void ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds);
 
 private:
