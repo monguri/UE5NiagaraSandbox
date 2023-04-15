@@ -869,49 +869,126 @@ void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, f
 	}
 }
 
-void ARopeSimulatorCPU::CalculateOneWallVelocityConstraint(int32 ParticleIdx, const FPlane& WallPlane, float SubStepDeltaSeconds, FVector& InOutDeltaVelocity)
+namespace
+{
+	FVector SolveWallRestituionDeltaVelocity(const FVector& WallNormal, float WallRestitution, float RestitutionSleepVelocity, const FVector& Velocity, const FVector& PrevConstraintSolveVelocity)
+	{
+		FVector DeltaVelocity = FVector::ZeroVector;
+
+		float RelativeVelocityNormal = Velocity | WallNormal;
+		if (FMath::Abs(RelativeVelocityNormal) > RestitutionSleepVelocity)
+		{
+			float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveVelocity | WallNormal;
+			DeltaVelocity = WallNormal * (-RelativeVelocityNormal + FMath::Max(-WallRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
+		}
+
+		return DeltaVelocity;
+	}
+
+	FVector SolveWallDynamicFrictionDeltaVelocity(const FVector& WallNormal, float WallDynamicFriction, const FVector& Velocity, const FVector& Acceleration, float SubStepDeltaSeconds)
+	{
+		float RelativeVelocityNormal = Velocity | WallNormal;
+		const FVector& RelativeVelocityTangent = Velocity - RelativeVelocityNormal * WallNormal;
+		float ForceNormalLen = FMath::Abs(Acceleration | WallNormal);
+		float RelativeVelocityTangentLen = RelativeVelocityTangent.Size();
+		return -RelativeVelocityTangent / FMath::Max(RelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * WallDynamicFriction * ForceNormalLen, RelativeVelocityTangentLen);
+	}
+}
+
+void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds)
 {
 	const FVector& RopeCenter = Positions[ParticleIdx];
-
 	const FVector& PrevConstraintSolveVelocity = PrevConstraintSolveVelocities[ParticleIdx];
 	const FVector& Velocity = Velocities[ParticleIdx];
 	const FVector& Acceleration = Accelerations[ParticleIdx];
 
 	float RestitutionSleepVelocity = 2.0f * FMath::Abs(Gravity) * SubStepDeltaSeconds;
 
-#if 0 // TODO:DiskからSphere形状への変化は後で修正
-	FVector DeepestPenetratePoint;
-	float DeepestPenetrateDepth;
-	bool bCollisioned = CalculateRopeToPlaneCollision(RopePlane, RopeCenter, RopeRadius, WallPlane, DeepestPenetratePoint, DeepestPenetrateDepth);
-	if (bCollisioned)
+	// TODO:もともと壁にもぐっている状態で速度が0のものは反発できないからどうすべきかということに解答が出せていない
+	FVector DeltaVelocity = FVector::ZeroVector;
+	if (((RopeCenter.Z + RopeRadius) - WallBox.Max.Z) > 0.0f)
 	{
+		const FVector& Normal = FVector(0.0f, 0.0f, -1.0f);
 		if (WallRestitution > KINDA_SMALL_NUMBER)
 		{
-			SolveRestituionDeltaVelocity(RopeCenter, DeepestPenetratePoint, WallPlane.GetNormal(), WallRestitution, RestitutionSleepVelocity, Velocity, FVector::ZeroVector, PrevConstraintSolveVelocity, InOutDeltaVelocity);
+			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
 		}
 
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
 		{
-			SolveDynamicFrictionDeltaVelocity(RopeCenter, DeepestPenetratePoint, WallPlane.GetNormal(), WallDynamicFriction, Velocity, FVector::ZeroVector, Acceleration, SubStepDeltaSeconds, InOutDeltaVelocity);
+			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
 		}
 	}
-#endif
-}
 
-void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds)
-{
-	FVector DeltaVelocity = FVector::ZeroVector;
+	if ((WallBox.Min.Z - (RopeCenter.Z - RopeRadius)) > 0.0f)
+	{
+		const FVector& Normal = FVector(0.0f, 0.0f, 1.0f);
+		if (WallRestitution > KINDA_SMALL_NUMBER)
+		{
+			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
+		}
 
-	// MinZ
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Max, -FVector::ZAxisVector), SubStepDeltaSeconds, DeltaVelocity);
-	// MinX
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Min, FVector::XAxisVector), SubStepDeltaSeconds, DeltaVelocity);
-	// MaxX
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Max, -FVector::XAxisVector), SubStepDeltaSeconds, DeltaVelocity);
-	// MinY
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Min, FVector::YAxisVector), SubStepDeltaSeconds, DeltaVelocity);
-	// MaxY
-	CalculateOneWallVelocityConstraint(ParticleIdx, FPlane(WallBox.Max, -FVector::YAxisVector), SubStepDeltaSeconds, DeltaVelocity);
+		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
+		{
+			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
+		}
+	}
+
+	if ((WallBox.Min.X - (RopeCenter.X - RopeRadius)) > 0.0f)
+	{
+		const FVector& Normal = FVector(1.0f, 0.0f, 0.0f);
+		if (WallRestitution > KINDA_SMALL_NUMBER)
+		{
+			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
+		}
+
+		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
+		{
+			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
+		}
+	}
+
+	if (((RopeCenter.X + RopeRadius) - WallBox.Max.X) > 0.0f)
+	{
+		const FVector& Normal = FVector(-1.0f, 0.0f, 0.0f);
+		if (WallRestitution > KINDA_SMALL_NUMBER)
+		{
+			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
+		}
+
+		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
+		{
+			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
+		}
+	}
+
+	if ((WallBox.Min.Y - (RopeCenter.Y - RopeRadius)) > 0.0f)
+	{
+		const FVector& Normal = FVector(0.0f, 1.0f, 0.0f);
+		if (WallRestitution > KINDA_SMALL_NUMBER)
+		{
+			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
+		}
+
+		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
+		{
+			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
+		}
+	}
+
+	if (((RopeCenter.Y + RopeRadius) - WallBox.Max.Y) > 0.0f)
+	{
+		const FVector& Normal = FVector(0.0f, -1.0f, 0.0f);
+		if (WallRestitution > KINDA_SMALL_NUMBER)
+		{
+			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
+		}
+
+		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
+		{
+			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
+		}
+	}
 
 	Velocities[ParticleIdx] += DeltaVelocity;
 }
