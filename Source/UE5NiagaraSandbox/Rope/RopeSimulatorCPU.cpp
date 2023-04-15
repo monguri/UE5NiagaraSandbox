@@ -328,7 +328,6 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
 
-#if 0 // TODO:DiskからSphere形状への変化は後で修正
 	// TODO:コリジョンについても、NeighborGridに入ってるものだけを処理するようにすればコストは減らせる。まあ数がパーティクルほど多くないし複数のセルにまたがるものが多いだろうからやるのも微妙だが
 	// そもそも物理アセット、あるいはプレイヤーのカプセルがこのアクタと交差してなければコリジョン計算の必要すらない。
 	// TODO:現フレームの現イテレーションでのコリジョンの位置と向きを前フレームのポーズでのコリジョン位置と現フレームのポーズでのコリジョン位置から
@@ -347,172 +346,66 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 			// イテレーションごとの位置補間は線形補間で行う
 			const FVector& CollisionCenter = FMath::Lerp(PrevSphereElem.Center, SphereElem.Center, FrameExeAlpha);
 
-			const FVector& CollisionCenterProjectedPoint = FVector::PointPlaneProject(CollisionCenter, RopePlane);
-
-			// これは厳密には球への最近接点でない。球がRopeの面の中央部分に接した場合などはRopeの円周部分は
-			// 最近接点にならない。球がRopeより十分大きいという前提での近似になっている。
-			const FVector& ClosestRopePoint = RopeCenter + (CollisionCenterProjectedPoint - RopeCenter).GetSafeNormal() * RopeRadius;
-
-			//TODO: RopeCenterと球のコリジョンをとらなくていい？
-
-			if ((ClosestRopePoint - CollisionCenter).SizeSquared() < SphereElem.Radius * SphereElem.Radius)
+			float LimitDistance = RopeRadius + SphereElem.Radius;
+			if ((Positions[ParticleIdx] - CollisionCenter).SizeSquared() < LimitDistance * LimitDistance)
 			{
-				FVector DeltaPos = (ClosestRopePoint - CollisionCenter).GetSafeNormal() * (SphereElem.Radius - (ClosestRopePoint - CollisionCenter).Size()) * CollisionProjectionAlpha;
-				if (((ClosestRopePoint - CollisionCenter) | (RopeCenter - CollisionCenter)) > 0.0f)
-				{
-					DeltaPos = (ClosestRopePoint - CollisionCenter).GetSafeNormal() * (SphereElem.Radius - (ClosestRopePoint - CollisionCenter).Size()) * CollisionProjectionAlpha;
-				}
-				else
-				{
-					// もし大きくめりこんで、RopeCenterに対してDeepestPenetratePointがカプセルの軸の反対側になったら
-					// 反発方向はRopeCenter側で反発距離にSphereRadiusを加算する
-					DeltaPos = (CollisionCenter - ClosestRopePoint).GetSafeNormal() * (SphereElem.Radius + (CollisionCenter - ClosestRopePoint).Size()) * CollisionProjectionAlpha;
-				}
-				Positions[ParticleIdx] += DeltaPos;
+				Positions[ParticleIdx] += (Positions[ParticleIdx] - CollisionCenter).GetSafeNormal() * (LimitDistance - (Positions[ParticleIdx] - CollisionCenter).Size()) * CollisionProjectionAlpha;
 			}
 		}
 
 		for (int32 j = 0; j < AggGeom.BoxElems.Num(); ++j)
 		{
-			const FKBoxElem& BoxElem = AggGeom.BoxElems[j];
+			// FKBoxElem::GetClosestPointAndNormalを参考にしている
+			FKBoxElem BoxElem = AggGeom.BoxElems[j];
 
+			// 球とBoxの当たり判定だと球がBoxの中に入ったかどうかで分岐して面倒なので、Boxを球の半径だけ大きくして点とBoxの当たり判定にする
+			BoxElem.X += RopeRadius * 2;
+			BoxElem.Y += RopeRadius * 2;
+			BoxElem.Z += RopeRadius * 2;
+
+			// Boxとの当たり判定ではBoxのローカル座標系で計算したほうがいい
 			FTransform BoxTM = PrevAggGeom.BoxElems[j].GetTransform();
 			// イテレーションごとの位置補間は線形補間で行う
 			BoxTM.BlendWith(BoxElem.GetTransform(), FrameExeAlpha);
+			const FVector& BoxLocalPosition = BoxTM.InverseTransformPositionNoScale(Positions[ParticleIdx]);
 
-			FVector HalfExtent(0.5f * BoxElem.X, 0.5f * BoxElem.Y, 0.5f * BoxElem.Z);
-			const FVector& BoxMin = BoxTM.TransformPositionNoScale(-HalfExtent);
-			const FVector& BoxMax = BoxTM.TransformPositionNoScale(HalfExtent);
+			const float HalfX = BoxElem.X * 0.5f;
+			const float HalfY = BoxElem.Y * 0.5f;
+			const float HalfZ = BoxElem.Z * 0.5f;
 
-			const FVector& BoxZAxis = BoxTM.GetUnitAxis(EAxis::Type::Z);
-			const FVector& BoxXAxis = BoxTM.GetUnitAxis(EAxis::Type::X);
-			const FVector& BoxYAxis = BoxTM.GetUnitAxis(EAxis::Type::Y);
-
-			// CalculateRopeToPlaneCollisionの戻り値はみない。DeepestPenetrateDepth > 0.0fならコリジョンしているので
-			FVector DeepestPenetratePointMinZ;
-			float DeepestPenetrateDepthMinZ = 0.0f;
-			bool bCollisioned = CalculateRopeToPlaneCollision(RopePlane, RopeCenter, RopeRadius, FPlane(BoxMin, -BoxZAxis), DeepestPenetratePointMinZ, DeepestPenetrateDepthMinZ);
-			if (!bCollisioned)
+			bool bIsInside = BoxLocalPosition.X > -HalfX && BoxLocalPosition.X < HalfX && BoxLocalPosition.Y > -HalfY && BoxLocalPosition.Y < HalfY && BoxLocalPosition.Z > -HalfZ && BoxLocalPosition.Z < HalfZ;
+			if (bIsInside)
 			{
-				continue;
-			}
+				float DistToX = HalfX - FMath::Abs(BoxLocalPosition.X);
+				float DistToY = HalfY - FMath::Abs(BoxLocalPosition.Y);
+				float DistToZ = HalfZ - FMath::Abs(BoxLocalPosition.Z);
 
-			FVector DeepestPenetratePointMaxZ;
-			float DeepestPenetrateDepthMaxZ = 0.0f;
-			bCollisioned = CalculateRopeToPlaneCollision(RopePlane, RopeCenter, RopeRadius, FPlane(BoxMax, BoxZAxis), DeepestPenetratePointMaxZ, DeepestPenetrateDepthMaxZ);
-			if (!bCollisioned)
-			{
-				continue;
-			}
-
-			FVector DeepestPenetratePointMinX;
-			float DeepestPenetrateDepthMinX = 0.0f;
-			bCollisioned = CalculateRopeToPlaneCollision(RopePlane, RopeCenter, RopeRadius, FPlane(BoxMin, -BoxXAxis), DeepestPenetratePointMinX, DeepestPenetrateDepthMinX);
-			if (!bCollisioned)
-			{
-				continue;
-			}
-
-
-			FVector DeepestPenetratePointMaxX;
-			float DeepestPenetrateDepthMaxX = 0.0f;
-			bCollisioned = CalculateRopeToPlaneCollision(RopePlane, RopeCenter, RopeRadius, FPlane(BoxMax, BoxXAxis), DeepestPenetratePointMaxX, DeepestPenetrateDepthMaxX);
-			if (!bCollisioned)
-			{
-				continue;
-			}
-
-
-			FVector DeepestPenetratePointMinY;
-			float DeepestPenetrateDepthMinY = 0.0f;
-			bCollisioned = CalculateRopeToPlaneCollision(RopePlane, RopeCenter, RopeRadius, FPlane(BoxMin, -BoxYAxis), DeepestPenetratePointMinY, DeepestPenetrateDepthMinY);
-			if (!bCollisioned)
-			{
-				continue;
-			}
-
-			FVector DeepestPenetratePointMaxY;
-			float DeepestPenetrateDepthMaxY = 0.0f;
-			bCollisioned = CalculateRopeToPlaneCollision(RopePlane, RopeCenter, RopeRadius, FPlane(BoxMax, BoxYAxis), DeepestPenetratePointMaxY, DeepestPenetrateDepthMaxY);
-			if (!bCollisioned)
-			{
-				continue;
-			}
-
-			check(DeepestPenetrateDepthMinZ > 0.0f);
-			check(DeepestPenetrateDepthMaxZ > 0.0f);
-			check(DeepestPenetrateDepthMinX > 0.0f);
-			check(DeepestPenetrateDepthMaxX > 0.0f);
-			check(DeepestPenetrateDepthMinY > 0.0f);
-			check(DeepestPenetrateDepthMaxY > 0.0f);
-
-			// 6個の変数をifで大小比較するのが大変なので3個にしぼる
-			// 配列にしてソートしてもいいが、compute shaderで扱うのが面倒なので
-			float SmallerPenetrateDepthZ = DeepestPenetrateDepthMinZ;
-			bool bSmallerIsMinZ = true;
-			if (DeepestPenetrateDepthMaxZ < DeepestPenetrateDepthMinZ)
-			{
-				SmallerPenetrateDepthZ = DeepestPenetrateDepthMaxZ;
-				bSmallerIsMinZ = false;
-			}
-
-			float SmallerPenetrateDepthX = DeepestPenetrateDepthMinX;
-			bool bSmallerIsMinX = true;
-			if (DeepestPenetrateDepthMaxX < DeepestPenetrateDepthMinX)
-			{
-				SmallerPenetrateDepthX = DeepestPenetrateDepthMaxX;
-				bSmallerIsMinX = false;
-			}
-
-			float SmallerPenetrateDepthY = DeepestPenetrateDepthMinY;
-			bool bSmallerIsMinY = true;
-			if (DeepestPenetrateDepthMaxY < DeepestPenetrateDepthMinY)
-			{
-				SmallerPenetrateDepthY = DeepestPenetrateDepthMaxY;
-				bSmallerIsMinY = false;
-			}
-
-			float SmallestPenetrateDepth;
-			FVector SmallestPenetratePoint;
-			FPlane SmallestBoxPlane;
-
-			if (SmallerPenetrateDepthX < SmallerPenetrateDepthY)
-			{
-				if (SmallerPenetrateDepthX < SmallerPenetrateDepthZ)
+				FVector ClosestLocalPosition = BoxLocalPosition;
+				if (DistToX < DistToY)
 				{
-					SmallestPenetrateDepth = SmallerPenetrateDepthX;
-					SmallestPenetratePoint = bSmallerIsMinX ? DeepestPenetratePointMinX : DeepestPenetratePointMaxX;
-					SmallestBoxPlane = bSmallerIsMinX ? FPlane(BoxMin, -BoxXAxis) : FPlane(BoxMax, BoxXAxis);
+					if (DistToX < DistToZ)
+					{
+						ClosestLocalPosition.X = BoxLocalPosition.X > 0.0f ? HalfX : -HalfX;
+					}
+					else
+					{
+						ClosestLocalPosition.Z = BoxLocalPosition.Z > 0.0f ? HalfZ : -HalfZ;
+					}
 				}
-				else
+				else // DistToY <= DistToX
 				{
-					SmallestPenetrateDepth = SmallerPenetrateDepthZ;
-					SmallestPenetratePoint = bSmallerIsMinZ ? DeepestPenetratePointMinZ : DeepestPenetratePointMaxZ;
-					SmallestBoxPlane = bSmallerIsMinZ ? FPlane(BoxMin, -BoxZAxis) : FPlane(BoxMax, BoxZAxis);
+					if (DistToY < DistToZ)
+					{
+						ClosestLocalPosition.Y = BoxLocalPosition.Y > 0.0f ? HalfY : -HalfY;
+					}
+					else
+					{
+						ClosestLocalPosition.Z = BoxLocalPosition.Z > 0.0f ? HalfZ : -HalfZ;
+					}
 				}
-			}
-			else // SmallerPenetrateDepthY <= SmallerPenetrateDepthX
-			{
-				if (SmallerPenetrateDepthY < SmallerPenetrateDepthZ)
-				{
-					SmallestPenetrateDepth = SmallerPenetrateDepthY;
-					SmallestPenetratePoint = bSmallerIsMinY ? DeepestPenetratePointMinY : DeepestPenetratePointMaxY;
-					SmallestBoxPlane = bSmallerIsMinY ? FPlane(BoxMin, -BoxYAxis) : FPlane(BoxMax, BoxYAxis);
-				}
-				else
-				{
-					SmallestPenetrateDepth = SmallerPenetrateDepthZ;
-					SmallestPenetratePoint = bSmallerIsMinZ ? DeepestPenetratePointMinZ : DeepestPenetratePointMaxZ;
-					SmallestBoxPlane = bSmallerIsMinZ ? FPlane(BoxMin, -BoxZAxis) : FPlane(BoxMax, BoxZAxis);
-				}
-			}
 
-			SmallestPenetrateDepth *= CollisionProjectionAlpha;
-
-			// RopeCenterがBoxの内側にあるかどうかは考慮しなくてもさほど影響は出ないだろうという妥協
-			float CenterProjection = FMath::Max(-SmallestBoxPlane.PlaneDot(RopeCenter) * CollisionProjectionAlpha, 0.0f);
-			const FVector& DeltaPos = CenterProjection * SmallestBoxPlane.GetNormal();
-			Positions[ParticleIdx] += DeltaPos;
+				Positions[ParticleIdx] += (BoxTM.TransformPositionNoScale(ClosestLocalPosition) - Positions[ParticleIdx]) * CollisionProjectionAlpha;
+			}
 		}
 
 		for (int32 j = 0; j < AggGeom.SphylElems.Num(); ++j)
@@ -533,31 +426,16 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 			// FMath::PointDistToSegmentSquared()は中でFMath::ClosestPointOnSegment() を呼び出しているので下で2回呼び出すのは無駄なので
 			// FMath::ClosestPointOnSegment()を使う
 			//float DistSquared = FMath::PointDistToSegmentSquared(Positions[ParticleIdx], StartPoint, EndPoint);
-			FVector ClosestPointOnSegment = FMath::ClosestPointOnSegment(RopeCenter, StartPoint, EndPoint);
-			const FVector& ClosestPointOnSegmentProjected = FVector::PointPlaneProject(ClosestPointOnSegment, RopePlane);
-			const FVector& DeepestPenetratePoint = RopeCenter + (ClosestPointOnSegmentProjected - RopeCenter).GetSafeNormal() * RopeRadius;
+			const FVector& ClosestPoint = FMath::ClosestPointOnSegment(Positions[ParticleIdx], StartPoint, EndPoint);
+			float DistSquared = (Positions[ParticleIdx] - ClosestPoint).SizeSquared();
 
-			// 厳密にはこのClosestPointOnSegmentとRopeCenterから計算した上のClosestPointOnSegmentは違うが、
-			// カプセルがRopeと比較してサイズが大きいものとして近似する。
-			ClosestPointOnSegment = FMath::ClosestPointOnSegment(DeepestPenetratePoint, StartPoint, EndPoint);
-			if ((ClosestPointOnSegment - DeepestPenetratePoint).SizeSquared() < SphylElem.Radius * SphylElem.Radius)
+			float LimitDistance = RopeRadius + SphylElem.Radius;
+			if (DistSquared < LimitDistance * LimitDistance)
 			{
-				FVector DeltaPos = (DeepestPenetratePoint - ClosestPointOnSegment).GetSafeNormal() * (SphylElem.Radius - (ClosestPointOnSegment - DeepestPenetratePoint).Size()) * CollisionProjectionAlpha;
-				if (((ClosestPointOnSegment - DeepestPenetratePoint) | (ClosestPointOnSegment - RopeCenter)) > 0.0f)
-				{
-					DeltaPos = (DeepestPenetratePoint - ClosestPointOnSegment).GetSafeNormal() * (SphylElem.Radius - (ClosestPointOnSegment - DeepestPenetratePoint).Size()) * CollisionProjectionAlpha;
-				}
-				else
-				{
-					// もし大きくめりこんで、RopeCenterに対してDeepestPenetratePointがカプセルの軸の反対側になったら
-					// 反発方向はRopeCenter側で反発距離にSphereRadiusを加算する
-					DeltaPos = (ClosestPointOnSegment - DeepestPenetratePoint).GetSafeNormal() * (SphylElem.Radius + (ClosestPointOnSegment - DeepestPenetratePoint).Size()) * CollisionProjectionAlpha;
-				}
-				Positions[ParticleIdx] += DeltaPos;
+				Positions[ParticleIdx] += (Positions[ParticleIdx] - ClosestPoint).GetSafeNormal() * (LimitDistance - (Positions[ParticleIdx] - ClosestPoint).Size()) * CollisionProjectionAlpha;
 			}
 		}
 	}
-#endif
 }
 
 void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount)
