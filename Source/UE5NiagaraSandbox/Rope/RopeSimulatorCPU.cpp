@@ -347,9 +347,9 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 			const FVector& CollisionCenter = FMath::Lerp(PrevSphereElem.Center, SphereElem.Center, FrameExeAlpha);
 
 			float LimitDistance = RopeRadius + SphereElem.Radius;
-			if ((Positions[ParticleIdx] - CollisionCenter).SizeSquared() < LimitDistance * LimitDistance)
+			if ((RopeCenter - CollisionCenter).SizeSquared() < LimitDistance * LimitDistance)
 			{
-				Positions[ParticleIdx] += (Positions[ParticleIdx] - CollisionCenter).GetSafeNormal() * (LimitDistance - (Positions[ParticleIdx] - CollisionCenter).Size()) * CollisionProjectionAlpha;
+				Positions[ParticleIdx] += (RopeCenter - CollisionCenter).GetSafeNormal() * (LimitDistance - (RopeCenter - CollisionCenter).Size()) * CollisionProjectionAlpha;
 			}
 		}
 
@@ -367,7 +367,7 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 			FTransform BoxTM = PrevAggGeom.BoxElems[j].GetTransform();
 			// イテレーションごとの位置補間は線形補間で行う
 			BoxTM.BlendWith(BoxElem.GetTransform(), FrameExeAlpha);
-			const FVector& BoxLocalPosition = BoxTM.InverseTransformPositionNoScale(Positions[ParticleIdx]);
+			const FVector& BoxLocalPosition = BoxTM.InverseTransformPositionNoScale(RopeCenter);
 
 			const float HalfX = BoxElem.X * 0.5f;
 			const float HalfY = BoxElem.Y * 0.5f;
@@ -404,7 +404,7 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 					}
 				}
 
-				Positions[ParticleIdx] += (BoxTM.TransformPositionNoScale(ClosestLocalPosition) - Positions[ParticleIdx]) * CollisionProjectionAlpha;
+				Positions[ParticleIdx] += (BoxTM.TransformPositionNoScale(ClosestLocalPosition) - RopeCenter) * CollisionProjectionAlpha;
 			}
 		}
 
@@ -425,14 +425,14 @@ void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 
 			const FVector& EndPoint = CollisionCenter + CapsuleTM.GetUnitAxis(EAxis::Type::Z) * SphylElem.Length * -0.5f;
 			// FMath::PointDistToSegmentSquared()は中でFMath::ClosestPointOnSegment() を呼び出しているので下で2回呼び出すのは無駄なので
 			// FMath::ClosestPointOnSegment()を使う
-			//float DistSquared = FMath::PointDistToSegmentSquared(Positions[ParticleIdx], StartPoint, EndPoint);
-			const FVector& ClosestPoint = FMath::ClosestPointOnSegment(Positions[ParticleIdx], StartPoint, EndPoint);
-			float DistSquared = (Positions[ParticleIdx] - ClosestPoint).SizeSquared();
+			//float DistSquared = FMath::PointDistToSegmentSquared(RopeCenter, StartPoint, EndPoint);
+			const FVector& ClosestPoint = FMath::ClosestPointOnSegment(RopeCenter, StartPoint, EndPoint);
+			float DistSquared = (RopeCenter - ClosestPoint).SizeSquared();
 
 			float LimitDistance = RopeRadius + SphylElem.Radius;
 			if (DistSquared < LimitDistance * LimitDistance)
 			{
-				Positions[ParticleIdx] += (Positions[ParticleIdx] - ClosestPoint).GetSafeNormal() * (LimitDistance - (Positions[ParticleIdx] - ClosestPoint).Size()) * CollisionProjectionAlpha;
+				Positions[ParticleIdx] += (RopeCenter - ClosestPoint).GetSafeNormal() * (LimitDistance - (RopeCenter - ClosestPoint).Size()) * CollisionProjectionAlpha;
 			}
 		}
 	}
@@ -444,7 +444,6 @@ void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, 
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
 
-#if 0 // TODO:DiskからSphere形状への変化は後で修正
 	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : CoinBlockerCollisionsPoseMap)
 	{
 		if (CollisionPose.Key == nullptr)
@@ -463,29 +462,10 @@ void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, 
 		const USphereComponent* SphereComp = Cast<const USphereComponent>(CollisionPose.Key.Get());
 		if (SphereComp != nullptr)
 		{
-			const FVector& CollisionCenterProjectedPoint = FVector::PointPlaneProject(CollisionCenter, RopePlane);
-
-			// これは厳密には球への最近接点でない。球がRopeの面の中央部分に接した場合などはRopeの円周部分は
-			// 最近接点にならない。球がRopeより十分大きいという前提での近似になっている。
-			const FVector& ClosestRopePoint = RopeCenter + (CollisionCenterProjectedPoint - RopeCenter).GetSafeNormal() * RopeRadius;
-
-			//TODO: RopeCenterと球のコリジョンをとらなくていい？
-
-			float SphereRadius = SphereComp->GetScaledSphereRadius();
-			if ((ClosestRopePoint - CollisionCenter).SizeSquared() < SphereRadius * SphereRadius)
+			float LimitDistance = RopeRadius + SphereComp->GetScaledSphereRadius();
+			if ((RopeCenter - CollisionCenter).SizeSquared() < LimitDistance * LimitDistance)
 			{
-				FVector DeltaPos = (ClosestRopePoint - CollisionCenter).GetSafeNormal() * (SphereRadius - (ClosestRopePoint - CollisionCenter).Size()) * CollisionProjectionAlpha;
-				if (((ClosestRopePoint - CollisionCenter) | (RopeCenter - CollisionCenter)) > 0.0f)
-				{
-					DeltaPos = (ClosestRopePoint - CollisionCenter).GetSafeNormal() * (SphereRadius - (ClosestRopePoint - CollisionCenter).Size()) * CollisionProjectionAlpha;
-				}
-				else
-				{
-					// もし大きくめりこんで、RopeCenterに対してDeepestPenetratePointがカプセルの軸の反対側になったら
-					// 反発方向はRopeCenter側で反発距離にSphereRadiusを加算する
-					DeltaPos = (CollisionCenter - ClosestRopePoint).GetSafeNormal() * (SphereRadius + (CollisionCenter - ClosestRopePoint).Size()) * CollisionProjectionAlpha;
-				}
-				Positions[ParticleIdx] += DeltaPos;
+				Positions[ParticleIdx] += (RopeCenter - CollisionCenter).GetSafeNormal() * (LimitDistance - (RopeCenter - CollisionCenter).Size()) * CollisionProjectionAlpha;
 			}
 			continue;
 		}
@@ -497,42 +477,24 @@ void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, 
 			// イテレーションごとの位置補間は線形補間で行う
 			CapsuleTM.BlendWith(PrevPose, FrameExeAlpha);
 
-
 			float HalfHeight = CapsuleComp->GetScaledCapsuleHalfHeight_WithoutHemisphere();
 			const FVector& ZAxis = CapsuleTM.GetUnitAxis(EAxis::Type::Z);
 			const FVector& StartPoint = CollisionCenter + ZAxis * HalfHeight;
 			const FVector& EndPoint = CollisionCenter - ZAxis * HalfHeight;
-
 			// FMath::PointDistToSegmentSquared()は中でFMath::ClosestPointOnSegment() を呼び出しているので下で2回呼び出すのは無駄なので
 			// FMath::ClosestPointOnSegment()を使う
-			//float DistSquared = FMath::PointDistToSegmentSquared(Positions[ParticleIdx], StartPoint, EndPoint);
-			FVector ClosestPointOnSegment = FMath::ClosestPointOnSegment(RopeCenter, StartPoint, EndPoint);
-			const FVector& ClosestPointOnSegmentProjected = FVector::PointPlaneProject(ClosestPointOnSegment, RopePlane);
-			const FVector& DeepestPenetratePoint = RopeCenter + (ClosestPointOnSegmentProjected - RopeCenter).GetSafeNormal() * RopeRadius;
+			//float DistSquared = FMath::PointDistToSegmentSquared(RopeCenter, StartPoint, EndPoint);
+			const FVector& ClosestPoint = FMath::ClosestPointOnSegment(RopeCenter, StartPoint, EndPoint);
+			float DistSquared = (RopeCenter - ClosestPoint).SizeSquared();
 
-			float CapsuleRadius = CapsuleComp->GetScaledCapsuleRadius();
-			// 厳密にはこのClosestPointOnSegmentとRopeCenterから計算した上のClosestPointOnSegmentは違うが、
-			// カプセルがRopeと比較してサイズが大きいものとして近似する。
-			ClosestPointOnSegment = FMath::ClosestPointOnSegment(DeepestPenetratePoint, StartPoint, EndPoint);
-			if ((ClosestPointOnSegment - DeepestPenetratePoint).SizeSquared() < CapsuleRadius * CapsuleRadius)
+			float LimitDistance = RopeRadius + CapsuleComp->GetScaledCapsuleRadius();
+			if (DistSquared < LimitDistance * LimitDistance)
 			{
-				FVector DeltaPos = (DeepestPenetratePoint - ClosestPointOnSegment).GetSafeNormal() * (CapsuleRadius - (ClosestPointOnSegment - DeepestPenetratePoint).Size()) * CollisionProjectionAlpha;
-				if (((ClosestPointOnSegment - DeepestPenetratePoint) | (ClosestPointOnSegment - RopeCenter)) > 0.0f)
-				{
-					DeltaPos = (DeepestPenetratePoint - ClosestPointOnSegment).GetSafeNormal() * (CapsuleRadius - (ClosestPointOnSegment - DeepestPenetratePoint).Size()) * CollisionProjectionAlpha;
-				}
-				else
-				{
-					// もし大きくめりこんで、RopeCenterに対してDeepestPenetratePointがカプセルの軸の反対側になったら
-					// 反発方向はRopeCenter側で反発距離にSphereRadiusを加算する
-					DeltaPos = (ClosestPointOnSegment - DeepestPenetratePoint).GetSafeNormal() * (CapsuleRadius + (ClosestPointOnSegment - DeepestPenetratePoint).Size()) * CollisionProjectionAlpha;
-				}
-				Positions[ParticleIdx] += DeltaPos;
+				Positions[ParticleIdx] += (RopeCenter - ClosestPoint).GetSafeNormal() * (LimitDistance - (RopeCenter - ClosestPoint).Size()) * CollisionProjectionAlpha;
 			}
 			continue;
 		}
 	}
-#endif
 }
 
 void ARopeSimulatorCPU::CalculateOneWallCollisionProjection(int32 ParticleIdx, const FPlane& WallPlane, FVector& InOutDeltaPos, FQuat& InOutDeltaRot)
