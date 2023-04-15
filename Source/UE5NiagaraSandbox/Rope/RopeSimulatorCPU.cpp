@@ -497,48 +497,42 @@ void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, 
 	}
 }
 
-void ARopeSimulatorCPU::CalculateOneWallCollisionProjection(int32 ParticleIdx, const FPlane& WallPlane, FVector& InOutDeltaPos, FQuat& InOutDeltaRot)
+void ARopeSimulatorCPU::ApplyWallCollisionConstraint(int32 ParticleIdx)
 {
 	const FVector& RopeCenter = Positions[ParticleIdx];
 
-	float CenterProjection = -WallPlane.PlaneDot(RopeCenter) * WallProjectionAlpha;
-
-	// ブレークポイントをはれるようにFMath::Max()でなくifを使っている
-	if (CenterProjection > 0.0f)
-	{
-		InOutDeltaPos += CenterProjection * WallPlane.GetNormal();
-	}
-	else
-	{
-		// 下の計算で使うのでめりこんでないときは0に
-		CenterProjection = 0.0f;
-	}
-
-#if 0 // TODO:DiskからSphere形状への変化は後で修正
-	FVector DeepestPenetratePoint;
-	float DeepestPenetrateDepth;
-	bool bCollisioned = CalculateRopeToPlaneCollision(RopePlane, RopeCenter, RopeRadius, WallPlane, DeepestPenetratePoint, DeepestPenetrateDepth);
-	DeepestPenetrateDepth *= WallProjectionAlpha;
-#endif
-}
-
-void ARopeSimulatorCPU::ApplyWallCollisionConstraint(int32 ParticleIdx)
-{
 	FVector DeltaPos = FVector::ZeroVector;
-	FQuat DeltaRot = FQuat(0.0f, 0.0f, 0.0f, 0.0f);
 
-	// MinZ
-	CalculateOneWallCollisionProjection(ParticleIdx, FPlane(WallBox.Min, FVector::ZAxisVector), DeltaPos, DeltaRot);
-	// MaxZ
-	CalculateOneWallCollisionProjection(ParticleIdx, FPlane(WallBox.Max, -FVector::ZAxisVector), DeltaPos, DeltaRot);
-	// MinX
-	CalculateOneWallCollisionProjection(ParticleIdx, FPlane(WallBox.Min, FVector::XAxisVector), DeltaPos, DeltaRot);
-	// MaxX
-	CalculateOneWallCollisionProjection(ParticleIdx, FPlane(WallBox.Max, -FVector::XAxisVector), DeltaPos, DeltaRot);
-	// MinY
-	CalculateOneWallCollisionProjection(ParticleIdx, FPlane(WallBox.Min, FVector::YAxisVector), DeltaPos, DeltaRot);
-	// MaxY
-	CalculateOneWallCollisionProjection(ParticleIdx, FPlane(WallBox.Max, -FVector::YAxisVector), DeltaPos, DeltaRot);
+	// ブレークポイントをはりやすいようにFMath::Max()でなくifにしている
+	if (((RopeCenter.Z + RopeRadius) - WallBox.Max.Z) > 0.0f)
+	{
+		DeltaPos += ((RopeCenter.Z + RopeRadius) - WallBox.Max.Z) * FVector(0.0f, 0.0f, -1.0f) * WallProjectionAlpha;
+	}
+
+	if ((WallBox.Min.Z - (RopeCenter.Z - RopeRadius)) > 0.0f)
+	{
+		DeltaPos += (WallBox.Min.Z - (RopeCenter.Z - RopeRadius)) * FVector(0.0f, 0.0f, 1.0f) * WallProjectionAlpha;
+	}
+
+	if ((WallBox.Min.X - (RopeCenter.X - RopeRadius)) > 0.0f)
+	{
+		DeltaPos += (WallBox.Min.X - (RopeCenter.X - RopeRadius)) * FVector(1.0f, 0.0f, 0.0f) * WallProjectionAlpha;
+	}
+
+	if (((RopeCenter.X + RopeRadius) - WallBox.Max.X) > 0.0f)
+	{
+		DeltaPos += ((RopeCenter.X + RopeRadius) - WallBox.Max.X) * FVector(-1.0f, 0.0f, 0.0f) * WallProjectionAlpha;
+	}
+
+	if ((WallBox.Min.Y - (RopeCenter.Y - RopeRadius)) > 0.0f)
+	{
+		DeltaPos += (WallBox.Min.Y - (RopeCenter.Y - RopeRadius)) * FVector(0.0f, 1.0f, 0.0f) * WallProjectionAlpha;
+	}
+
+	if (((RopeCenter.Y + RopeRadius) - WallBox.Max.Y) > 0.0f)
+	{
+		DeltaPos += ((RopeCenter.Y + RopeRadius) - WallBox.Max.Y) * FVector(0.0f, -1.0f, 0.0f) * WallProjectionAlpha;
+	}
 
 	Positions[ParticleIdx] += DeltaPos;
 }
