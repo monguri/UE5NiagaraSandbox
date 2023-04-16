@@ -68,7 +68,7 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 		float FixedDeltaSeconds = 1.0f / FrameRate;
 		float SubStepDeltaSeconds = FixedDeltaSeconds / NumSubStep;
 
-		UpdateCoinBlockers();
+		UpdateRopeBlockers();
 
 		// Niagara版はParticleAttributeReaderの値がSimStageのイテレーション単位でしか更新されない。
 		// そのため、サブステップを複数にしても、Integrate()で落ちた位置をそのサブステップ回でParticleAttributeReaderから参照できない。
@@ -100,7 +100,7 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 
 bool ARopeSimulatorCPU::IsCollisioned(const FVector& Position) const
 {
-	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : CoinBlockerCollisionsPoseMap)
+	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : RopeBlockerCollisionsPoseMap)
 	{
 		if (CollisionPose.Key == nullptr)
 		{
@@ -120,7 +120,7 @@ bool ARopeSimulatorCPU::IsCollisioned(const FVector& Position) const
 	return false;
 }
 
-void ARopeSimulatorCPU::UpdateCoinBlockers()
+void ARopeSimulatorCPU::UpdateRopeBlockers()
 {
 	TArray<FOverlapResult> Overlaps;
 	FCollisionObjectQueryParams ObjectParams(OverlapQueryObjectTypes);
@@ -129,19 +129,19 @@ void ARopeSimulatorCPU::UpdateCoinBlockers()
 		return;
 	}
 
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(UpdateCoinBlockers), false);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(UpdateRopeBlockers), false);
 
 	GetWorld()->OverlapMultiByObjectType(Overlaps, GetActorLocation() + WallBox.GetCenter(), GetActorQuat(), ObjectParams, FCollisionShape::MakeBox(WallBox.GetExtent()), Params);
 
 	// キャラクターが増減したりコリジョンコンポーネントが増減することを想定し、呼ばれるたびに配列を作り直す
-	PrevCoinBlockerCollisionsPoseMap = CoinBlockerCollisionsPoseMap;
-	CoinBlockerCollisionsPoseMap.Reset();
+	PrevRopeBlockerCollisionsPoseMap = RopeBlockerCollisionsPoseMap;
+	RopeBlockerCollisionsPoseMap.Reset();
 
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
 		if (Overlap.Component != nullptr)
 		{
-			CoinBlockerCollisionsPoseMap.Add(Overlap.Component, Overlap.Component->GetComponentTransform() * InvActorTransform);
+			RopeBlockerCollisionsPoseMap.Add(Overlap.Component, Overlap.Component->GetComponentTransform() * InvActorTransform);
 		}
 	}
 }
@@ -161,7 +161,7 @@ void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 		{
 			for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumRopes; ++ParticleIdx)
 			{
-				ApplyCoinBlockersCollisionConstraint(ParticleIdx, InFrameExeCount);
+				ApplyRopeBlockersCollisionConstraint(ParticleIdx, InFrameExeCount);
 				ApplyWallCollisionConstraint(ParticleIdx);
 			}
 		}
@@ -193,7 +193,7 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 				{
 					if (CollisionRestitution > KINDA_SMALL_NUMBER || CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 					{
-						ApplyCoinBlockersVelocityConstraint(ParticleIdx, DeltaSeconds, SubStepDeltaSeconds, SubStepCount);
+						ApplyRopeBlockersVelocityConstraint(ParticleIdx, DeltaSeconds, SubStepDeltaSeconds, SubStepCount);
 					}
 
 					if (WallRestitution > KINDA_SMALL_NUMBER || WallDynamicFriction > KINDA_SMALL_NUMBER)
@@ -241,13 +241,13 @@ namespace
 	}
 }
 
-void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount)
+void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount)
 {
 	float FrameExeAlpha = (InFrameExeCount + 1) / (NumSubStep * NumIteration);
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
 
-	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : CoinBlockerCollisionsPoseMap)
+	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : RopeBlockerCollisionsPoseMap)
 	{
 		if (CollisionPose.Key == nullptr)
 		{
@@ -256,7 +256,7 @@ void ARopeSimulatorCPU::ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, 
 
 		const FTransform& Pose = CollisionPose.Value;
 		// 前フレームで同じコンポーネントがなければ、前フレームのポーズは現フレームのポーズとしておく
-		const FTransform* PrevPosePtr = PrevCoinBlockerCollisionsPoseMap.Find(CollisionPose.Key);
+		const FTransform* PrevPosePtr = PrevRopeBlockerCollisionsPoseMap.Find(CollisionPose.Key);
 		const FTransform& PrevPose = PrevPosePtr == nullptr ? Pose : *PrevPosePtr;
 		// イテレーションごとの位置補間は線形補間で行う
 		const FVector& CollisionCenter = FMath::Lerp(PrevPose.GetLocation(), Pose.GetLocation(), FrameExeAlpha);
@@ -376,14 +376,14 @@ namespace
 	}
 }
 
-void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount)
+void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount)
 {
 	float RestitutionSleepVelocity = 2.0f * FMath::Abs(Gravity) * SubStepDeltaSeconds;
 	float SubStepAlpha = (SubStepCount + 1) / NumSubStep;
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
 
-	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : CoinBlockerCollisionsPoseMap)
+	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : RopeBlockerCollisionsPoseMap)
 	{
 		if (CollisionPose.Key == nullptr)
 		{
@@ -392,7 +392,7 @@ void ARopeSimulatorCPU::ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, f
 
 		const FTransform& Pose = CollisionPose.Value;
 		// 前フレームで同じコンポーネントがなければ、前フレームのポーズは現フレームのポーズとしておく
-		const FTransform* PrevPosePtr = PrevCoinBlockerCollisionsPoseMap.Find(CollisionPose.Key);
+		const FTransform* PrevPosePtr = PrevRopeBlockerCollisionsPoseMap.Find(CollisionPose.Key);
 		const FTransform& PrevPose = PrevPosePtr == nullptr ? Pose : *PrevPosePtr;
 		// イテレーションごとの位置補間は線形補間で行う
 		const FVector& CollisionCenter = FMath::Lerp(PrevPose.GetLocation(), Pose.GetLocation(), SubStepAlpha);

@@ -115,14 +115,14 @@ private:
 		FCollisionCandidate(int32 _AnotherParticleIdx) : AnotherParticleIdx(_AnotherParticleIdx) {}
 	};
 
-	void UpdateCoinBlockers();
+	void UpdateRopeBlockers();
 	bool IsCollisioned(const FVector& Position) const;
 	void Integrate(int32 ParticleIdx, float SubStepDeltaSeconds);
 	void SolvePositionConstraint(int32 InFrameExeCount);
 	void SolveVelocity(float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
-	void ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount);
+	void ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount);
 	void ApplyWallCollisionConstraint(int32 ParticleIdx);
-	void ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
+	void ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
 	void ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds);
 
 private:
@@ -141,10 +141,10 @@ private:
 	FTransform InvActorTransform = FTransform::Identity;
 
 	UPROPERTY(Transient)
-	TMap<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> PrevCoinBlockerCollisionsPoseMap;
+	TMap<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> PrevRopeBlockerCollisionsPoseMap;
 
 	UPROPERTY(Transient)
-	TMap<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CoinBlockerCollisionsPoseMap;
+	TMap<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> RopeBlockerCollisionsPoseMap;
 
 public:
 	/** Returns NiagaraComponent subobject **/
