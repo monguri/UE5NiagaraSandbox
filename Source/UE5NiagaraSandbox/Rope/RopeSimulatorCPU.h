@@ -122,7 +122,7 @@ private:
 private:
 	TArray<FVector> Positions;
 	TArray<FVector> PrevPositions;
-	TArray<FVector> PrevConstraintSolvePositions;
+	TArray<FVector> PrevCurrentIterationPositions;
 	TArray<FVector> Velocities;
 	TArray<FVector> PrevConstraintSolveVelocities;
 	TArray<FVector> PrevSolveVelocities;

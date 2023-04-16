@@ -24,7 +24,7 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 
 	Positions.SetNum(NumParticles);
 	PrevPositions.SetNum(NumParticles);
-	PrevConstraintSolvePositions.SetNum(NumParticles);
+	PrevCurrentIterationPositions.SetNum(NumParticles);
 	Velocities.SetNum(NumParticles);
 	PrevConstraintSolveVelocities.SetNum(NumParticles);
 	PrevSolveVelocities.SetNum(NumParticles);
@@ -34,7 +34,7 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ++ParticleIdx)
 	{
-		Positions[ParticleIdx] = FVector(0.0f, 0.0f, -RestLength * ParticleIdx);
+		PrevCurrentIterationPositions[ParticleIdx] = Positions[ParticleIdx] = FVector(0.0f, 0.0f, -RestLength * ParticleIdx);
 		PrevSolveVelocities[ParticleIdx] = PrevConstraintSolveVelocities[ParticleIdx] = Velocities[ParticleIdx] = FVector::ZeroVector;
 		Accelerations[ParticleIdx] = InvActorTransform.TransformVectorNoScale(FVector(0.0f, 0.0f, Gravity));
 
@@ -126,16 +126,15 @@ void ARopeSimulatorCPU::Integrate(int32 ParticleIdx, float SubStepDeltaSeconds)
 	PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 	Velocities[ParticleIdx] += Accelerations[ParticleIdx] * SubStepDeltaSeconds;
 	Positions[ParticleIdx] += Velocities[ParticleIdx] * SubStepDeltaSeconds;
-	PrevConstraintSolvePositions[ParticleIdx] = Positions[ParticleIdx];
-}
-
-void ARopeSimulatorCPU::ApplyDistanceConstraint(int32 ParticleIdx)
-{
-	// TODO:実装
 }
 
 void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 {
+	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ++ParticleIdx)
+	{
+		PrevCurrentIterationPositions[ParticleIdx] = Positions[ParticleIdx];
+	}
+
 	ParallelFor(NumThreads,
 		[this, InFrameExeCount](int32 ThreadIndex)
 		{
@@ -149,6 +148,43 @@ void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 	);
 }
 
+void ARopeSimulatorCPU::ApplyDistanceConstraint(int32 ParticleIdx)
+{
+	// 0番目は固定点
+	if (ParticleIdx == 0)
+	{
+		return;
+	}
+
+	// Parent-Self
+	{
+		const FVector& ParentToSelf = PrevCurrentIterationPositions[ParticleIdx] - PrevCurrentIterationPositions[ParticleIdx - 1];
+		const FVector& ParentToSelfDir = ParentToSelf.GetSafeNormal();
+		float DiffLength = ParentToSelf.Size() - RestLength;
+
+		if (ParticleIdx == 1)
+		{
+			Positions[ParticleIdx] -= ParentToSelfDir * DiffLength;
+		}
+		else
+		{
+			Positions[ParticleIdx - 1] += ParentToSelfDir * DiffLength * 0.5f;
+			Positions[ParticleIdx] -= ParentToSelfDir * DiffLength * 0.5f;
+		}
+	}
+
+	// Self-Child
+	if (ParticleIdx < NumParticles - 1) // 末端はChildがない
+	{
+		const FVector& ChildToSelf = PrevCurrentIterationPositions[ParticleIdx] - PrevCurrentIterationPositions[ParticleIdx + 1];
+		const FVector& ChildToSelfDir = ChildToSelf.GetSafeNormal();
+		float DiffLength = ChildToSelf.Size() - RestLength;
+
+		Positions[ParticleIdx + 1] += ChildToSelfDir * DiffLength * 0.5f;
+		Positions[ParticleIdx] -= ChildToSelfDir * DiffLength * 0.5f;
+	}
+}
+
 void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount)
 {
 	// 確定したPositionsから一旦Velocitiesを決定する
@@ -158,7 +194,7 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 	{
 		// 位置コンストレイントで受ける力の総和を計算。コリジョンの押し返される反作用力と距離コンストレイントの実効力。
 		// Accelerations変数を外力の加速度として使うだけでなく、位置コンストレイントで受ける力の総和として再利用する。
-		Accelerations[ParticleIdx] = (Positions[ParticleIdx] - PrevConstraintSolvePositions[ParticleIdx]) * InvSquareSubStepDeltaSeconds;
+		Accelerations[ParticleIdx] = (Positions[ParticleIdx] - PrevCurrentIterationPositions[ParticleIdx]) * InvSquareSubStepDeltaSeconds;
 
 		PrevConstraintSolveVelocities[ParticleIdx] = Velocities[ParticleIdx]; // 位置コンストレイントと静止摩擦で位置が修正される前の速度。反発の計算に使う
 		Velocities[ParticleIdx] = (Positions[ParticleIdx] - PrevPositions[ParticleIdx]) * InvSubStepDeltaSeconds;
