@@ -61,7 +61,6 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 	// 何度も使うのでキャッシュしておく
 	InvActorTransform = GetActorTransform().Inverse();
 
-#if 0
 	if (DeltaSeconds > KINDA_SMALL_NUMBER)
 	{
 		// DeltaSecondsの値の変動に関わらず、シミュレーションに使うサブステップタイムは固定とする
@@ -92,7 +91,6 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 			SolveVelocity(DeltaSeconds, SubStepDeltaSeconds, SubStep);
 		}
 	}
-#endif
 
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
 }

@@ -77,19 +77,13 @@ private:
 	float FrameRate = 60.0f;
 
 	UPROPERTY(EditAnywhere)
-	FBox WallBox = FBox(FVector(-45.0f, -45.0f, -45.0f), FVector(45.0f, 45.0f, 45.0f));
+	FBox WallBox = FBox(FVector(-150.0f, -150.0f, -150.0f), FVector(150.0f, 150.0f, 150.0f));
 
 	UPROPERTY(EditAnywhere)
 	float CollisionProjectionAlpha = 0.8f;
 
 	UPROPERTY(EditAnywhere)
-	float CollisionRotProjectionAlpha = 0.5f;
-
-	UPROPERTY(EditAnywhere)
 	float WallProjectionAlpha = 0.8f;
-
-	UPROPERTY(EditAnywhere)
-	float WallRotProjectionAlpha = 0.5f;
 
 	UPROPERTY(EditAnywhere)
 	float CollisionRestitution = 0.0f;
@@ -105,9 +99,6 @@ private:
 
 	UPROPERTY(EditAnywhere)
 	TArray<TEnumAsByte<EObjectTypeQuery>> OverlapQueryObjectTypes;
-
-	UPROPERTY(EditAnywhere)
-	int32 FadeFrameInterval = 30;
 
 private:
 	struct FCollisionCandidate
