@@ -28,14 +28,17 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	Velocities.SetNum(NumParticles);
 	PrevConstraintSolveVelocities.SetNum(NumParticles);
 	PrevSolveVelocities.SetNum(NumParticles);
+	Orientations.SetNum(NumParticles);
 	Colors.SetNum(NumParticles);
 	Accelerations.SetNum(NumParticles);
 
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ++ParticleIdx)
 	{
+		Positions[ParticleIdx] = FVector(0.0f, 0.0f, -RestLength * ParticleIdx);
 		PrevSolveVelocities[ParticleIdx] = PrevConstraintSolveVelocities[ParticleIdx] = Velocities[ParticleIdx] = FVector::ZeroVector;
 		Accelerations[ParticleIdx] = InvActorTransform.TransformVectorNoScale(FVector(0.0f, 0.0f, Gravity));
 
+		Orientations[ParticleIdx] = FQuat(FVector::ZAxisVector, PI / 2) * FQuat(FVector::XAxisVector, PI / 2);
 		Colors[ParticleIdx] = FLinearColor::MakeRandomColor();
 	}
 
@@ -45,6 +48,7 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	NiagaraComponent->SetNiagaraVariableInt("Shape", 0);
 	NiagaraComponent->SetNiagaraVariableVec3("MeshScale", FVector(MeshScale));
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
+	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayColor(NiagaraComponent, FName("Colors"), Colors);
 
 	NumThreadParticles = (NumParticles + NumThreads - 1) / NumThreads;
@@ -57,6 +61,7 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 	// 何度も使うのでキャッシュしておく
 	InvActorTransform = GetActorTransform().Inverse();
 
+#if 0
 	if (DeltaSeconds > KINDA_SMALL_NUMBER)
 	{
 		// DeltaSecondsの値の変動に関わらず、シミュレーションに使うサブステップタイムは固定とする
@@ -87,6 +92,7 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 			SolveVelocity(DeltaSeconds, SubStepDeltaSeconds, SubStep);
 		}
 	}
+#endif
 
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
 }
@@ -125,6 +131,11 @@ void ARopeSimulatorCPU::Integrate(int32 ParticleIdx, float SubStepDeltaSeconds)
 	PrevConstraintSolvePositions[ParticleIdx] = Positions[ParticleIdx];
 }
 
+void ARopeSimulatorCPU::ApplyDistanceConstraint(int32 ParticleIdx)
+{
+	// TODO:実装
+}
+
 void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 {
 	ParallelFor(NumThreads,
@@ -132,6 +143,7 @@ void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 		{
 			for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumParticles; ++ParticleIdx)
 			{
+				ApplyDistanceConstraint(ParticleIdx);
 				ApplyRopeBlockersCollisionConstraint(ParticleIdx, InFrameExeCount);
 				ApplyWallCollisionConstraint(ParticleIdx);
 			}
