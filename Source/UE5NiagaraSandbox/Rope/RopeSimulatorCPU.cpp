@@ -53,24 +53,6 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayColor(NiagaraComponent, FName("Colors"), Colors);
 
 	NumThreadParticles = (NumRopes + NumThreads - 1) / NumThreads;
-
-	for (const AActor* CollisionActor : CollisionActors)
-	{
-		// CollisionActorsはプレー中に動的に変化しない前提
-		const UPrimitiveComponent* Primitive = CollisionActor->FindComponentByClass<UPrimitiveComponent>();
-		if (Primitive == nullptr || Primitive->GetBodyInstance() == nullptr || Primitive->GetBodyInstance()->GetBodySetup() == nullptr)
-		{
-			// CollisionActors内でBodySetupをもたないアクタはプレー中は変化しないという前提
-			continue;
-		}
-
-		// とりあえずワールド座標の状態で保存するがすぐUpdateActorCollisions()でローカル座標に変換する
-		ActorsAggGeom.Add(Primitive->GetBodyInstance()->GetBodySetup()->AggGeom);
-	}
-
-	// プレーを開始した最初のフレームでActorsAggGeomとPrevActorsAggGeomを初期ポーズで初期化しておく
-	UpdateActorCollisions();
-	PrevActorsAggGeom = ActorsAggGeom;
 }
 
 void ARopeSimulatorCPU::Tick(float DeltaSeconds)
@@ -86,7 +68,6 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 		float FixedDeltaSeconds = 1.0f / FrameRate;
 		float SubStepDeltaSeconds = FixedDeltaSeconds / NumSubStep;
 
-		UpdateActorCollisions();
 		UpdateCoinBlockers();
 
 		// Niagara版はParticleAttributeReaderの値がSimStageのイテレーション単位でしか更新されない。
@@ -119,18 +100,6 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 
 bool ARopeSimulatorCPU::IsCollisioned(const FVector& Position) const
 {
-	for (const AActor* CollisionActor : CollisionActors)
-	{
-		const FBox& WorldBoxBound = CollisionActor->GetComponentsBoundingBox(false, false);
-		const FBox& BoxBound = WorldBoxBound.TransformBy(InvActorTransform);
-		// Boxと点のコリジョン判定にするために半径分だけBoxサイズを拡張する
-		const FBox& ExpandedBoxBound = BoxBound.ExpandBy(RopeRadius);
-		if (ExpandedBoxBound.IsInsideOrOn(Position))
-		{
-			return true;
-		}
-	}
-
 	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : CoinBlockerCollisionsPoseMap)
 	{
 		if (CollisionPose.Key == nullptr)
@@ -149,54 +118,6 @@ bool ARopeSimulatorCPU::IsCollisioned(const FVector& Position) const
 	}
 
 	return false;
-}
-
-void ARopeSimulatorCPU::UpdateActorCollisions()
-{
-	PrevActorsAggGeom = ActorsAggGeom;
-
-	int32 Counter = 0;
-	for (const AActor* CollisionActor : CollisionActors)
-	{
-		// CollisionActorsはプレー中に動的に変化しない前提
-		const UPrimitiveComponent* Primitive = CollisionActor->FindComponentByClass<UPrimitiveComponent>();
-		if (Primitive == nullptr || Primitive->GetBodyInstance() == nullptr || Primitive->GetBodyInstance()->GetBodySetup() == nullptr)
-		{
-			// CollisionActors内でBodySetupをもたないアクタはプレー中は変化しないという前提
-			continue;
-		}
-
-		// ローカル座標に変換
-		const FTransform& ActorTM = CollisionActor->GetTransform() * InvActorTransform;
-
-		const FKAggregateGeom& OriginalAggGeom = Primitive->GetBodyInstance()->GetBodySetup()->AggGeom;
-		FKAggregateGeom& CacheAggGeom = ActorsAggGeom[Counter];
-		Counter++;
-
-		for (int32 i = 0; i < OriginalAggGeom.SphereElems.Num(); ++i)
-		{
-			// CollisionGeometryVisualization.cppのUE::PhysicsTools::InitializePreviewGeometryLines()を参考にしている
-			CacheAggGeom.SphereElems[i] = OriginalAggGeom.SphereElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
-			CacheAggGeom.SphereElems[i].Radius = OriginalAggGeom.SphereElems[i].Radius * ActorTM.GetScale3D().GetAbsMax(); 
-		}
-
-		for (int32 i = 0; i < OriginalAggGeom.BoxElems.Num(); ++i)
-		{
-			// CollisionGeometryVisualization.cppのUE::PhysicsTools::InitializePreviewGeometryLines()を参考にしている
-			CacheAggGeom.BoxElems[i] = OriginalAggGeom.BoxElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
-			CacheAggGeom.BoxElems[i].X = OriginalAggGeom.BoxElems[i].X * ActorTM.GetScale3D().X;
-			CacheAggGeom.BoxElems[i].Y = OriginalAggGeom.BoxElems[i].Y * ActorTM.GetScale3D().Y;
-			CacheAggGeom.BoxElems[i].Z = OriginalAggGeom.BoxElems[i].Z * ActorTM.GetScale3D().Z;
-		}
-
-		for (int32 i = 0; i < OriginalAggGeom.SphylElems.Num(); ++i)
-		{
-			// CollisionGeometryVisualization.cppのUE::PhysicsTools::InitializePreviewGeometryLines()を参考にしている
-			CacheAggGeom.SphylElems[i] = OriginalAggGeom.SphylElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
-			CacheAggGeom.SphylElems[i].Radius = OriginalAggGeom.SphylElems[i].GetScaledRadius(ActorTM.GetScale3D());
-			CacheAggGeom.SphylElems[i].Length = OriginalAggGeom.SphylElems[i].GetScaledCylinderLength(ActorTM.GetScale3D());
-		}
-	}
 }
 
 void ARopeSimulatorCPU::UpdateCoinBlockers()
@@ -240,7 +161,6 @@ void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 		{
 			for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumRopes; ++ParticleIdx)
 			{
-				ApplyCollisionActorsConstraint(ParticleIdx, InFrameExeCount);
 				ApplyCoinBlockersCollisionConstraint(ParticleIdx, InFrameExeCount);
 				ApplyWallCollisionConstraint(ParticleIdx);
 			}
@@ -273,7 +193,6 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 				{
 					if (CollisionRestitution > KINDA_SMALL_NUMBER || CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 					{
-						ApplyCollisionActorsVelocityConstraint(ParticleIdx, DeltaSeconds, SubStepDeltaSeconds, SubStepCount);
 						ApplyCoinBlockersVelocityConstraint(ParticleIdx, DeltaSeconds, SubStepDeltaSeconds, SubStepCount);
 					}
 
@@ -319,122 +238,6 @@ namespace
 		}
 
 		return (OutDeepestPenetrateDepth > 0.0f);
-	}
-}
-
-void ARopeSimulatorCPU::ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 InFrameExeCount)
-{
-	float FrameExeAlpha = (InFrameExeCount + 1) / (NumSubStep * NumIteration);
-
-	const FVector& RopeCenter = Positions[ParticleIdx];
-
-	// TODO:コリジョンについても、NeighborGridに入ってるものだけを処理するようにすればコストは減らせる。まあ数がパーティクルほど多くないし複数のセルにまたがるものが多いだろうからやるのも微妙だが
-	// そもそも物理アセット、あるいはプレイヤーのカプセルがこのアクタと交差してなければコリジョン計算の必要すらない。
-	// TODO:現フレームの現イテレーションでのコリジョンの位置と向きを前フレームのポーズでのコリジョン位置と現フレームのポーズでのコリジョン位置から
-	// 補間で求めているが、それをパーティクルごとにやるのはもったいない。キャッシュしたいね。キャッシュもイテレーションごとにやる必要出るが。
-	for (int32 i = 0; i < ActorsAggGeom.Num(); ++i)
-	{
-		const FKAggregateGeom& AggGeom = ActorsAggGeom[i];
-		const FKAggregateGeom& PrevAggGeom = PrevActorsAggGeom[i];
-
-		for (int32 j = 0; j < AggGeom.SphereElems.Num(); ++j)
-		{
-			// FKSphereElem::GetClosestPointAndNormalを参考にしている
-			const FKSphereElem& SphereElem = AggGeom.SphereElems[j];
-			const FKSphereElem& PrevSphereElem = PrevAggGeom.SphereElems[j];
-
-			// イテレーションごとの位置補間は線形補間で行う
-			const FVector& CollisionCenter = FMath::Lerp(PrevSphereElem.Center, SphereElem.Center, FrameExeAlpha);
-
-			float LimitDistance = RopeRadius + SphereElem.Radius;
-			if ((RopeCenter - CollisionCenter).SizeSquared() < LimitDistance * LimitDistance)
-			{
-				Positions[ParticleIdx] += (RopeCenter - CollisionCenter).GetSafeNormal() * (LimitDistance - (RopeCenter - CollisionCenter).Size()) * CollisionProjectionAlpha;
-			}
-		}
-
-		for (int32 j = 0; j < AggGeom.BoxElems.Num(); ++j)
-		{
-			// FKBoxElem::GetClosestPointAndNormalを参考にしている
-			FKBoxElem BoxElem = AggGeom.BoxElems[j];
-
-			// 球とBoxの当たり判定だと球がBoxの中に入ったかどうかで分岐して面倒なので、Boxを球の半径だけ大きくして点とBoxの当たり判定にする
-			BoxElem.X += RopeRadius * 2;
-			BoxElem.Y += RopeRadius * 2;
-			BoxElem.Z += RopeRadius * 2;
-
-			// Boxとの当たり判定ではBoxのローカル座標系で計算したほうがいい
-			FTransform BoxTM = PrevAggGeom.BoxElems[j].GetTransform();
-			// イテレーションごとの位置補間は線形補間で行う
-			BoxTM.BlendWith(BoxElem.GetTransform(), FrameExeAlpha);
-			const FVector& BoxLocalPosition = BoxTM.InverseTransformPositionNoScale(RopeCenter);
-
-			const float HalfX = BoxElem.X * 0.5f;
-			const float HalfY = BoxElem.Y * 0.5f;
-			const float HalfZ = BoxElem.Z * 0.5f;
-
-			bool bIsInside = BoxLocalPosition.X > -HalfX && BoxLocalPosition.X < HalfX && BoxLocalPosition.Y > -HalfY && BoxLocalPosition.Y < HalfY && BoxLocalPosition.Z > -HalfZ && BoxLocalPosition.Z < HalfZ;
-			if (bIsInside)
-			{
-				float DistToX = HalfX - FMath::Abs(BoxLocalPosition.X);
-				float DistToY = HalfY - FMath::Abs(BoxLocalPosition.Y);
-				float DistToZ = HalfZ - FMath::Abs(BoxLocalPosition.Z);
-
-				FVector ClosestLocalPosition = BoxLocalPosition;
-				if (DistToX < DistToY)
-				{
-					if (DistToX < DistToZ)
-					{
-						ClosestLocalPosition.X = BoxLocalPosition.X > 0.0f ? HalfX : -HalfX;
-					}
-					else
-					{
-						ClosestLocalPosition.Z = BoxLocalPosition.Z > 0.0f ? HalfZ : -HalfZ;
-					}
-				}
-				else // DistToY <= DistToX
-				{
-					if (DistToY < DistToZ)
-					{
-						ClosestLocalPosition.Y = BoxLocalPosition.Y > 0.0f ? HalfY : -HalfY;
-					}
-					else
-					{
-						ClosestLocalPosition.Z = BoxLocalPosition.Z > 0.0f ? HalfZ : -HalfZ;
-					}
-				}
-
-				Positions[ParticleIdx] += (BoxTM.TransformPositionNoScale(ClosestLocalPosition) - RopeCenter) * CollisionProjectionAlpha;
-			}
-		}
-
-		for (int32 j = 0; j < AggGeom.SphylElems.Num(); ++j)
-		{
-			// FKSphylElem::GetClosestPointAndNormalを参考にしている
-			const FKSphylElem& SphylElem = AggGeom.SphylElems[j];
-			const FKSphylElem& PrevSphylElem = PrevAggGeom.SphylElems[j];
-
-			// イテレーションごとの位置補間は線形補間で行う
-			const FVector& CollisionCenter = FMath::Lerp(PrevSphylElem.Center, SphylElem.Center, FrameExeAlpha);
-
-			FTransform CapsuleTM = PrevSphylElem.GetTransform();
-			// イテレーションごとの位置補間は線形補間で行う
-			CapsuleTM.BlendWith(SphylElem.GetTransform(), FrameExeAlpha);
-
-			const FVector& StartPoint = CollisionCenter + CapsuleTM.GetUnitAxis(EAxis::Type::Z) * SphylElem.Length * 0.5f;
-			const FVector& EndPoint = CollisionCenter + CapsuleTM.GetUnitAxis(EAxis::Type::Z) * SphylElem.Length * -0.5f;
-			// FMath::PointDistToSegmentSquared()は中でFMath::ClosestPointOnSegment() を呼び出しているので下で2回呼び出すのは無駄なので
-			// FMath::ClosestPointOnSegment()を使う
-			//float DistSquared = FMath::PointDistToSegmentSquared(RopeCenter, StartPoint, EndPoint);
-			const FVector& ClosestPoint = FMath::ClosestPointOnSegment(RopeCenter, StartPoint, EndPoint);
-			float DistSquared = (RopeCenter - ClosestPoint).SizeSquared();
-
-			float LimitDistance = RopeRadius + SphylElem.Radius;
-			if (DistSquared < LimitDistance * LimitDistance)
-			{
-				Positions[ParticleIdx] += (RopeCenter - ClosestPoint).GetSafeNormal() * (LimitDistance - (RopeCenter - ClosestPoint).Size()) * CollisionProjectionAlpha;
-			}
-		}
 	}
 }
 
@@ -570,199 +373,6 @@ namespace
 		const FVector& DeltaVelocity = -RelativeVelocityTangent / FMath::Max(RelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * WallDynamicFriction * ForceNormalLen, RelativeVelocityTangentLen);
 
 		InOutDeltaVelocity += DeltaVelocity;
-	}
-}
-
-void ARopeSimulatorCPU::ApplyCollisionActorsVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount)
-{
-	float RestitutionSleepVelocity = 2.0f * FMath::Abs(Gravity) * SubStepDeltaSeconds;
-	float SubStepAlpha = (SubStepCount + 1) / NumSubStep;
-	const FVector& RopeCenter = Positions[ParticleIdx];
-
-	// TODO:コリジョンについても、NeighborGridに入ってるものだけを処理するようにすればコストは減らせる。まあ数がパーティクルほど多くないし複数のセルにまたがるものが多いだろうからやるのも微妙だが
-	// そもそも物理アセット、あるいはプレイヤーのカプセルがこのアクタと交差してなければコリジョン計算の必要すらない。
-	// TODO:現フレームの現イテレーションでのコリジョンの位置と向きを前フレームのポーズでのコリジョン位置と現フレームのポーズでのコリジョン位置から
-	// 補間で求めているが、それをパーティクルごとにやるのはもったいない。キャッシュしたいね。キャッシュもイテレーションごとにやる必要出るが。
-	for (int32 i = 0; i < ActorsAggGeom.Num(); ++i)
-	{
-		const FKAggregateGeom& AggGeom = ActorsAggGeom[i];
-		const FKAggregateGeom& PrevAggGeom = PrevActorsAggGeom[i];
-
-		for (int32 j = 0; j <AggGeom.SphereElems.Num(); ++j)
-		{
-			// FKSphereElem::GetClosestPointAndNormalを参考にしている
-			const FKSphereElem& SphereElem = AggGeom.SphereElems[j];
-			const FKSphereElem& PrevSphereElem = PrevAggGeom.SphereElems[j];
-
-			// イテレーションごとの位置補間は線形補間で行う
-			const FVector& CollisionCenter = FMath::Lerp(PrevSphereElem.Center, SphereElem.Center, SubStepAlpha);
-			const FVector& CollisionVelocity = (SphereElem.Center - PrevSphereElem.Center) / DeltaSeconds;
-
-			float LimitDistance = RopeRadius + SphereElem.Radius;
-			if ((RopeCenter - CollisionCenter).SizeSquared() < LimitDistance * LimitDistance)
-			{
-				const FVector& PrevSolveRelativeVelocity = PrevSolveVelocities[ParticleIdx] - CollisionVelocity;
-				const FVector& ImpactNormal = (RopeCenter - CollisionCenter).GetSafeNormal();
-
-				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
-				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
-				{
-					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionVelocity;
-					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
-					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
-				}
-
-				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
-				{
-					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
-					float ForceNormalLen = FMath::Abs(Accelerations[ParticleIdx] | ImpactNormal);
-					float PrevSolveRelativeVelocityTangentLen = PrevSolveRelativeVelocityTangent.Size();
-					Velocities[ParticleIdx] -= PrevSolveRelativeVelocityTangent / FMath::Max(PrevSolveRelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * CollisionDynamicFriction * ForceNormalLen, PrevSolveRelativeVelocityTangentLen);
-				}
-			}
-		}
-
-		for (int32 j = 0; j <AggGeom.BoxElems.Num(); ++j)
-		{
-			// FKBoxElem::GetClosestPointAndNormalを参考にしている
-			FKBoxElem BoxElem = AggGeom.BoxElems[j];
-			const FKBoxElem& PrevBoxElem = PrevAggGeom.BoxElems[j];
-
-			// 球とBoxの当たり判定だと球がBoxの中に入ったかどうかで分岐して面倒なので、Boxを球の半径だけ大きくして点とBoxの当たり判定にする
-			BoxElem.X += RopeRadius * 2;
-			BoxElem.Y += RopeRadius * 2;
-			BoxElem.Z += RopeRadius * 2;
-
-			// Boxとの当たり判定ではワールド基準でなくBoxのローカル座標系で計算したほうがいい
-			FTransform BoxTM = PrevBoxElem.GetTransform();
-			// イテレーションごとの位置補間は線形補間で行う
-			BoxTM.BlendWith(BoxElem.GetTransform(), SubStepAlpha);
-			const FVector& BoxLocalPosition = BoxTM.InverseTransformPositionNoScale(RopeCenter);
-
-			const float HalfX = BoxElem.X * 0.5f;
-			const float HalfY = BoxElem.Y * 0.5f;
-			const float HalfZ = BoxElem.Z * 0.5f;
-
-			bool bIsInside = BoxLocalPosition.X > -HalfX && BoxLocalPosition.X < HalfX && BoxLocalPosition.Y > -HalfY && BoxLocalPosition.Y < HalfY && BoxLocalPosition.Z > -HalfZ && BoxLocalPosition.Z < HalfZ;
-			if (bIsInside)
-			{
-				float DistToX = HalfX - FMath::Abs(BoxLocalPosition.X);
-				float DistToY = HalfY - FMath::Abs(BoxLocalPosition.Y);
-				float DistToZ = HalfZ - FMath::Abs(BoxLocalPosition.Z);
-
-				FVector ClosestLocalPosition = BoxLocalPosition;
-				FVector ImpactNormal = FVector::ZeroVector;
-				if (DistToX < DistToY)
-				{
-					if (DistToX < DistToZ)
-					{
-						float Sign = BoxLocalPosition.X > 0.0f ? 1.0f : -1.0f;
-						ClosestLocalPosition.X = HalfX * Sign;
-						ImpactNormal = FVector::XAxisVector * Sign;
-					}
-					else
-					{
-						float Sign = BoxLocalPosition.Z > 0.0f ? 1.0f : -1.0f;
-						ClosestLocalPosition.Z = HalfZ * Sign;
-						ImpactNormal = FVector::ZAxisVector * Sign;
-					}
-				}
-				else // DistToY <= DistToX
-				{
-					if (DistToY < DistToZ)
-					{
-						float Sign = BoxLocalPosition.Y > 0.0f ? 1.0f : -1.0f;
-						ClosestLocalPosition.Y = HalfY * Sign;
-						ImpactNormal = FVector::YAxisVector * Sign;
-					}
-					else
-					{
-						float Sign = BoxLocalPosition.Z > 0.0f ? 1.0f : -1.0f;
-						ClosestLocalPosition.Z = HalfZ * Sign;
-						ImpactNormal = FVector::ZAxisVector * Sign;
-					}
-				}
-
-				// インパクトポイントの速度を求める
-				const FVector& CenterToClosestPos = BoxTM.GetRotation().RotateVector(ClosestLocalPosition);
-				const FQuat& RotDiff = BoxElem.GetTransform().GetRotation() * PrevBoxElem.GetTransform().GetRotation().Inverse();
-				const FVector& PrevCenterToClosestPos = RotDiff.UnrotateVector(CenterToClosestPos);
-				const FVector& CollisionImpactPointVelocity = ((BoxElem.Center + CenterToClosestPos) - (PrevBoxElem.Center + PrevCenterToClosestPos)) / DeltaSeconds;
-
-				const FVector& PrevSolveRelativeVelocity = PrevSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
-				ImpactNormal = BoxTM.TransformVectorNoScale(ImpactNormal);
-
-				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
-				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
-				{
-					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
-					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
-					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
-				}
-
-				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
-				{
-					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
-					float ForceNormalLen = FMath::Abs(Accelerations[ParticleIdx] | ImpactNormal);
-					float PrevSolveRelativeVelocityTangentLen = PrevSolveRelativeVelocityTangent.Size();
-					Velocities[ParticleIdx] -= PrevSolveRelativeVelocityTangent / FMath::Max(PrevSolveRelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * CollisionDynamicFriction * ForceNormalLen, PrevSolveRelativeVelocityTangentLen);
-				}
-			}
-		}
-
-		for (int32 j = 0; j <AggGeom.SphylElems.Num(); ++j)
-		{
-			// FKSphylElem::GetClosestPointAndNormalを参考にしている
-			const FKSphylElem& SphylElem = AggGeom.SphylElems[j];
-			const FKSphylElem& PrevSphylElem = PrevAggGeom.SphylElems[j];
-
-			// イテレーションごとの位置補間は線形補間で行う
-			const FVector& CollisionCenter = FMath::Lerp(PrevSphylElem.Center, SphylElem.Center, SubStepAlpha);
-
-			FTransform CapsuleTM = PrevSphylElem.GetTransform();
-			// イテレーションごとの位置補間は線形補間で行う
-			CapsuleTM.BlendWith(SphylElem.GetTransform(), SubStepAlpha);
-
-			const FVector& ZAxis = CapsuleTM.GetUnitAxis(EAxis::Type::Z);
-			const FVector& StartPoint = CollisionCenter + ZAxis * SphylElem.Length * 0.5f;
-			const FVector& EndPoint = CollisionCenter + ZAxis * SphylElem.Length * -0.5f;
-			// FMath::PointDistToSegmentSquared()は中でFMath::ClosestPointOnSegment() を呼び出しているので下で2回呼び出すのは無駄なので
-			// FMath::ClosestPointOnSegment()を使う
-			//float DistSquared = FMath::PointDistToSegmentSquared(RopeCenter, StartPoint, EndPoint);
-			const FVector& ClosestPoint = FMath::ClosestPointOnSegment(RopeCenter, StartPoint, EndPoint);
-			float DistSquared = (RopeCenter - ClosestPoint).SizeSquared();
-
-			float LimitDistance = RopeRadius + SphylElem.Radius;
-			if (DistSquared < LimitDistance * LimitDistance)
-			{
-				// インパクトポイントの速度を求める
-				const FVector& ClosestLocalPosition = CapsuleTM.InverseTransformPosition(ClosestPoint);
-				const FVector& CenterToClosestPos = CapsuleTM.GetRotation().RotateVector(ClosestLocalPosition);
-				const FQuat& RotDiff = SphylElem.GetTransform().GetRotation() * PrevSphylElem.GetTransform().GetRotation().Inverse();
-				const FVector& PrevCenterToClosestPos = RotDiff.UnrotateVector(CenterToClosestPos);
-				const FVector& CollisionImpactPointVelocity = ((SphylElem.Center + CenterToClosestPos) - (PrevSphylElem.Center + PrevCenterToClosestPos)) / DeltaSeconds;
-
-				const FVector& PrevSolveRelativeVelocity = PrevSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
-
-				const FVector& ImpactNormal = (RopeCenter - ClosestPoint).GetSafeNormal();
-
-				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
-				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
-				{
-					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
-					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
-					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
-				}
-
-				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
-				{
-					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
-					float ForceNormalLen = FMath::Abs(Accelerations[ParticleIdx] | ImpactNormal);
-					float PrevSolveRelativeVelocityTangentLen = PrevSolveRelativeVelocityTangent.Size();
-					Velocities[ParticleIdx] -= PrevSolveRelativeVelocityTangent / FMath::Max(PrevSolveRelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * CollisionDynamicFriction * ForceNormalLen, PrevSolveRelativeVelocityTangentLen);
-				}
-			}
-		}
 	}
 }
 

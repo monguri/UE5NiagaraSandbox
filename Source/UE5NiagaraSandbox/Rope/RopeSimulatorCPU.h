@@ -101,9 +101,6 @@ private:
 	float WallDynamicFriction = 0.0f;
 
 	UPROPERTY(EditAnywhere)
-	TArray<AActor*> CollisionActors;
-
-	UPROPERTY(EditAnywhere)
 	TArray<TEnumAsByte<EObjectTypeQuery>> OverlapQueryObjectTypes;
 
 	UPROPERTY(EditAnywhere)
@@ -118,16 +115,13 @@ private:
 		FCollisionCandidate(int32 _AnotherParticleIdx) : AnotherParticleIdx(_AnotherParticleIdx) {}
 	};
 
-	void UpdateActorCollisions();
 	void UpdateCoinBlockers();
 	bool IsCollisioned(const FVector& Position) const;
 	void Integrate(int32 ParticleIdx, float SubStepDeltaSeconds);
 	void SolvePositionConstraint(int32 InFrameExeCount);
 	void SolveVelocity(float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
-	void ApplyCollisionActorsConstraint(int32 ParticleIdx, int32 InFrameExeCount);
 	void ApplyCoinBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount);
 	void ApplyWallCollisionConstraint(int32 ParticleIdx);
-	void ApplyCollisionActorsVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
 	void ApplyCoinBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
 	void ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds);
 
@@ -145,8 +139,6 @@ private:
 	TArray<FMatrix> InertiaInvs;
 	int32 NumThreadParticles = 0;
 	FTransform InvActorTransform = FTransform::Identity;
-	TArray<FKAggregateGeom> PrevActorsAggGeom;
-	TArray<FKAggregateGeom> ActorsAggGeom;
 
 	UPROPERTY(Transient)
 	TMap<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> PrevCoinBlockerCollisionsPoseMap;
