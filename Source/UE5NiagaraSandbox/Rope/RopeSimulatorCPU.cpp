@@ -37,19 +37,14 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 		Accelerations[ParticleIdx] = InvActorTransform.TransformVectorNoScale(FVector(0.0f, 0.0f, Gravity));
 
 		Colors[ParticleIdx] = FLinearColor::MakeRandomColor();
-
-		// スリープの仕組みを使うケースでは初期化時は全パーティクルスリープ状態から開始する
 	}
 
 	// Tick()で設定しても、レベルにNiagaraSystemが最初から配置されていると、初回のスポーンでは配列は初期値を使ってしまい
 	//間に合わないのでBeginPlay()でも設定する
 	NiagaraComponent->SetNiagaraVariableInt("NumParticles", NumParticles);
-	// メッシュはシリンダーに固定
-	NiagaraComponent->SetNiagaraVariableInt("Shape", 1);
-	NiagaraComponent->SetNiagaraVariableVec3("MeshScale", FVector(MeshScale)); // 使うメッシュが1x1x1で半径0.5なので2倍にしておく。厚みは幅の0.2倍に
+	NiagaraComponent->SetNiagaraVariableInt("Shape", 0);
+	NiagaraComponent->SetNiagaraVariableVec3("MeshScale", FVector(MeshScale));
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
-	// TODO:
-	//UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayColor(NiagaraComponent, FName("Colors"), Colors);
 
 	NumThreadParticles = (NumParticles + NumThreads - 1) / NumThreads;
@@ -72,7 +67,7 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 
 		// Niagara版はParticleAttributeReaderの値がSimStageのイテレーション単位でしか更新されない。
 		// そのため、サブステップを複数にしても、Integrate()で落ちた位置をそのサブステップ回でParticleAttributeReaderから参照できない。
-		// となると形状維持コンストレイントのために自由落下が妨げられて遅くなる。
+		// となると距離コンストレイントのために自由落下が妨げられて遅くなる。
 		for (int32 SubStep = 0; SubStep < NumSubStep; ++SubStep)
 		{
 			// マルチスレッド化するほどの処理でもないのでしない
@@ -94,30 +89,6 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 	}
 
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
-	//TODO:
-	//UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
-}
-
-bool ARopeSimulatorCPU::IsCollisioned(const FVector& Position) const
-{
-	for (TPair<TWeakObjectPtr<class UPrimitiveComponent>, FTransform> CollisionPose : RopeBlockerCollisionsPoseMap)
-	{
-		if (CollisionPose.Key == nullptr)
-		{
-			continue;
-		}
-
-		const FBox& WorldBoxBound = CollisionPose.Key->Bounds.GetBox();
-		const FBox& BoxBound = WorldBoxBound.TransformBy(InvActorTransform);
-		// Boxと点のコリジョン判定にするために半径分だけBoxサイズを拡張する
-		const FBox& ExpandedBoxBound = BoxBound.ExpandBy(RopeRadius);
-		if (ExpandedBoxBound.IsInsideOrOn(Position))
-		{
-			return true;
-		}
-	}
-
-	return false;
 }
 
 void ARopeSimulatorCPU::UpdateRopeBlockers()
@@ -175,7 +146,7 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 	float InvSquareSubStepDeltaSeconds = InvSubStepDeltaSeconds * InvSubStepDeltaSeconds;
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ++ParticleIdx)
 	{
-		// 位置コンストレイントで受ける力の総和を計算。コリジョンの押し返される反作用力と形状維持コンストレイントの実効力。
+		// 位置コンストレイントで受ける力の総和を計算。コリジョンの押し返される反作用力と距離コンストレイントの実効力。
 		// Accelerations変数を外力の加速度として使うだけでなく、位置コンストレイントで受ける力の総和として再利用する。
 		Accelerations[ParticleIdx] = (Positions[ParticleIdx] - PrevConstraintSolvePositions[ParticleIdx]) * InvSquareSubStepDeltaSeconds;
 

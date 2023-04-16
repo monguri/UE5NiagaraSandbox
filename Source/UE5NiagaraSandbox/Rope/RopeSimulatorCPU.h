@@ -116,7 +116,6 @@ private:
 	};
 
 	void UpdateRopeBlockers();
-	bool IsCollisioned(const FVector& Position) const;
 	void Integrate(int32 ParticleIdx, float SubStepDeltaSeconds);
 	void SolvePositionConstraint(int32 InFrameExeCount);
 	void SolveVelocity(float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
