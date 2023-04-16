@@ -22,16 +22,16 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	// 何度も使うのでキャッシュしておく
 	InvActorTransform = GetActorTransform().Inverse();
 
-	Positions.SetNum(NumRopes);
-	PrevPositions.SetNum(NumRopes);
-	PrevConstraintSolvePositions.SetNum(NumRopes);
-	Velocities.SetNum(NumRopes);
-	PrevConstraintSolveVelocities.SetNum(NumRopes);
-	PrevSolveVelocities.SetNum(NumRopes);
-	Colors.SetNum(NumRopes);
-	Accelerations.SetNum(NumRopes);
+	Positions.SetNum(NumParticles);
+	PrevPositions.SetNum(NumParticles);
+	PrevConstraintSolvePositions.SetNum(NumParticles);
+	Velocities.SetNum(NumParticles);
+	PrevConstraintSolveVelocities.SetNum(NumParticles);
+	PrevSolveVelocities.SetNum(NumParticles);
+	Colors.SetNum(NumParticles);
+	Accelerations.SetNum(NumParticles);
 
-	for (int32 ParticleIdx = 0; ParticleIdx < NumRopes; ++ParticleIdx)
+	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ++ParticleIdx)
 	{
 		PrevSolveVelocities[ParticleIdx] = PrevConstraintSolveVelocities[ParticleIdx] = Velocities[ParticleIdx] = FVector::ZeroVector;
 		Accelerations[ParticleIdx] = InvActorTransform.TransformVectorNoScale(FVector(0.0f, 0.0f, Gravity));
@@ -43,7 +43,7 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 
 	// Tick()で設定しても、レベルにNiagaraSystemが最初から配置されていると、初回のスポーンでは配列は初期値を使ってしまい
 	//間に合わないのでBeginPlay()でも設定する
-	NiagaraComponent->SetNiagaraVariableInt("NumParticles", NumRopes);
+	NiagaraComponent->SetNiagaraVariableInt("NumParticles", NumParticles);
 	// メッシュはシリンダーに固定
 	NiagaraComponent->SetNiagaraVariableInt("Shape", 1);
 	NiagaraComponent->SetNiagaraVariableVec3("MeshScale", FVector(MeshScale)); // 使うメッシュが1x1x1で半径0.5なので2倍にしておく。厚みは幅の0.2倍に
@@ -52,7 +52,7 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	//UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayColor(NiagaraComponent, FName("Colors"), Colors);
 
-	NumThreadParticles = (NumRopes + NumThreads - 1) / NumThreads;
+	NumThreadParticles = (NumParticles + NumThreads - 1) / NumThreads;
 }
 
 void ARopeSimulatorCPU::Tick(float DeltaSeconds)
@@ -76,7 +76,7 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 		for (int32 SubStep = 0; SubStep < NumSubStep; ++SubStep)
 		{
 			// マルチスレッド化するほどの処理でもないのでしない
-			for (int32 ParticleIdx = 0; ParticleIdx < NumRopes; ++ParticleIdx)
+			for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ++ParticleIdx)
 			{
 				Accelerations[ParticleIdx] = InvActorTransform.TransformVectorNoScale(FVector(0.0f, 0.0f, Gravity));
 
@@ -159,7 +159,7 @@ void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 	ParallelFor(NumThreads,
 		[this, InFrameExeCount](int32 ThreadIndex)
 		{
-			for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumRopes; ++ParticleIdx)
+			for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumParticles; ++ParticleIdx)
 			{
 				ApplyRopeBlockersCollisionConstraint(ParticleIdx, InFrameExeCount);
 				ApplyWallCollisionConstraint(ParticleIdx);
@@ -173,7 +173,7 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 	// 確定したPositionsから一旦Velocitiesを決定する
 	float InvSubStepDeltaSeconds = 1.0f / SubStepDeltaSeconds;
 	float InvSquareSubStepDeltaSeconds = InvSubStepDeltaSeconds * InvSubStepDeltaSeconds;
-	for (int32 ParticleIdx = 0; ParticleIdx < NumRopes; ++ParticleIdx)
+	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ++ParticleIdx)
 	{
 		// 位置コンストレイントで受ける力の総和を計算。コリジョンの押し返される反作用力と形状維持コンストレイントの実効力。
 		// Accelerations変数を外力の加速度として使うだけでなく、位置コンストレイントで受ける力の総和として再利用する。
@@ -189,7 +189,7 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 		ParallelFor(NumThreads,
 			[DeltaSeconds, SubStepDeltaSeconds, SubStepCount, this](int32 ThreadIndex)
 			{
-				for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumRopes; ++ParticleIdx)
+				for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumParticles; ++ParticleIdx)
 				{
 					if (CollisionRestitution > KINDA_SMALL_NUMBER || CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 					{

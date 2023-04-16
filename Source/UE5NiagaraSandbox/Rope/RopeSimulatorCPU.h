@@ -62,7 +62,7 @@ private:
 	int32 NumThreads = 4;
 
 	UPROPERTY(EditAnywhere)
-	int32 NumRopes = 100;
+	int32 NumParticles = 100;
 
 	UPROPERTY(EditAnywhere)
 	int32 NumSubStep = 1;
