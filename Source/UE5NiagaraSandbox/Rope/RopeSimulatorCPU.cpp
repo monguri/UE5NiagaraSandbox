@@ -28,6 +28,7 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	Velocities.SetNum(NumParticles);
 	PrevConstraintSolveVelocities.SetNum(NumParticles);
 	PrevSolveVelocities.SetNum(NumParticles);
+	InitialOrientations.SetNum(NumParticles);
 	Orientations.SetNum(NumParticles);
 	Colors.SetNum(NumParticles);
 	Accelerations.SetNum(NumParticles);
@@ -38,7 +39,7 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 		PrevSolveVelocities[ParticleIdx] = PrevConstraintSolveVelocities[ParticleIdx] = Velocities[ParticleIdx] = FVector::ZeroVector;
 		Accelerations[ParticleIdx] = InvActorTransform.TransformVectorNoScale(FVector(0.0f, 0.0f, Gravity));
 
-		Orientations[ParticleIdx] = FQuat(FVector::ZAxisVector, PI / 2) * FQuat(FVector::XAxisVector, PI / 2);
+		Orientations[ParticleIdx] = InitialOrientations[ParticleIdx] = FQuat(FVector::ZAxisVector, PI / 2) * FQuat(FVector::XAxisVector, PI / 2);
 		Colors[ParticleIdx] = FLinearColor::MakeRandomColor();
 	}
 
@@ -93,6 +94,26 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 	}
 
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
+
+	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ++ParticleIdx)
+	{
+		// 初期配置がローカル座標でZ軸負方向にチェインがのびていて、そのときに回転が0という前提。
+		// 子供と自分の位置差分ベクトルをパーティクルの向きとする。
+		if (ParticleIdx == NumParticles - 1)
+		{
+			// TODO:ダミーパーティクルはやらず親と自分の位置差分にするので親のパーティクルと向きが同じになる
+			// という問題は残っている
+			const FVector& ParentToSelf = Positions[ParticleIdx] - Positions[ParticleIdx - 1];
+			Orientations[ParticleIdx] = FQuat::FindBetween(-FVector::ZAxisVector, ParentToSelf) * InitialOrientations[ParticleIdx];
+		}
+		else
+		{
+			const FVector& SelfToChild = Positions[ParticleIdx + 1] - Positions[ParticleIdx];
+			Orientations[ParticleIdx] = FQuat::FindBetween(-FVector::ZAxisVector, SelfToChild) * InitialOrientations[ParticleIdx];
+		}
+	}
+
+	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
 }
 
 void ARopeSimulatorCPU::UpdateRopeBlockers()

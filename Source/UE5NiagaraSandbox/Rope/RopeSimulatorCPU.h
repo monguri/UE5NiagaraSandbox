@@ -126,6 +126,7 @@ private:
 	TArray<FVector> Velocities;
 	TArray<FVector> PrevConstraintSolveVelocities;
 	TArray<FVector> PrevSolveVelocities;
+	TArray<FQuat> InitialOrientations;
 	TArray<FQuat> Orientations;
 	TArray<FLinearColor> Colors;
 	// 加速度と慣性モーメントは毎フレーム計算するのでフレーム間のひきつぎはないのだが、使用メモリやTArrayの生成負荷をおさえるために
