@@ -63,6 +63,14 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	NumThreadParticles = (NumParticles + NumThreads - 1) / NumThreads;
 }
 
+void ARopeSimulatorCPU::SetEndPosition(const FVector& Position)
+{
+	// テレポートにあたるので、Prev系の変数も初期化し、速度の効果を出さない
+	PrevCurrentIterationPositions[NumParticles - 1] = Positions[NumParticles - 1] = GetActorTransform().Inverse().TransformPosition(Position); // Tick()より先に呼ばれうるのでInvActorTransformを使わない
+	PrevSolveVelocities[NumParticles - 1] = PrevConstraintSolveVelocities[NumParticles - 1] = Velocities[NumParticles - 1] = FVector::ZeroVector;
+	// Orientationsは最後の向きを計算する工程に任せる
+}
+
 void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);

@@ -104,6 +104,9 @@ private:
 	UPROPERTY(EditAnywhere)
 	bool bConstraintEndPosition = false;
 
+	UFUNCTION(BlueprintCallable)
+	void SetEndPosition(const FVector& Position);
+
 private:
 	struct FCollisionCandidate
 	{
