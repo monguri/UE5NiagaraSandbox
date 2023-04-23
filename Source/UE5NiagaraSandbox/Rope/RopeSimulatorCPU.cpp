@@ -160,6 +160,12 @@ void ARopeSimulatorCPU::Integrate(int32 ParticleIdx, float SubStepDeltaSeconds)
 		return;
 	}
 
+	// bConstraintEndPosition==trueのときは末端も固定
+	if (bConstraintEndPosition && (ParticleIdx == NumParticles - 1))
+	{
+		return;
+	}
+
 	Velocities[ParticleIdx] += Accelerations[ParticleIdx] * SubStepDeltaSeconds;
 	Positions[ParticleIdx] += Velocities[ParticleIdx] * SubStepDeltaSeconds;
 }
@@ -178,6 +184,12 @@ void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 			{
 				// 0番目は固定点
 				if (ParticleIdx == 0)
+				{
+					continue;
+				}
+
+				// bConstraintEndPosition==trueのときは末端も固定
+				if (bConstraintEndPosition && (ParticleIdx == NumParticles - 1))
 				{
 					continue;
 				}
@@ -241,6 +253,12 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 				{
 					// 0番目は固定点
 					if (ParticleIdx == 0)
+					{
+						continue;
+					}
+
+					// bConstraintEndPosition==trueのときは末端も固定
+					if (bConstraintEndPosition && (ParticleIdx == NumParticles - 1))
 					{
 						continue;
 					}

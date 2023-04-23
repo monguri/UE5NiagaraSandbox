@@ -49,6 +49,7 @@ private:
 	UFUNCTION(CallInEditor)
 	void OnNiagaraSystemFinished(UNiagaraComponent* FinishedComponent);
 
+private:
 	UPROPERTY(EditAnywhere)
 	float MeshScale = 1.0f;
 
@@ -99,6 +100,9 @@ private:
 
 	UPROPERTY(EditAnywhere)
 	TArray<TEnumAsByte<EObjectTypeQuery>> OverlapQueryObjectTypes;
+
+	UPROPERTY(EditAnywhere)
+	bool bConstraintEndPosition = false;
 
 private:
 	struct FCollisionCandidate
