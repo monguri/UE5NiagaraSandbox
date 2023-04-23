@@ -124,6 +124,13 @@ void ARopeSimulatorCPU::UpdateRopeBlockers()
 void ARopeSimulatorCPU::Integrate(int32 ParticleIdx, float SubStepDeltaSeconds)
 {
 	PrevPositions[ParticleIdx] = Positions[ParticleIdx];
+
+	// 0番目は固定点
+	if (ParticleIdx == 0)
+	{
+		return;
+	}
+
 	Velocities[ParticleIdx] += Accelerations[ParticleIdx] * SubStepDeltaSeconds;
 	Positions[ParticleIdx] += Velocities[ParticleIdx] * SubStepDeltaSeconds;
 }
@@ -140,6 +147,12 @@ void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 		{
 			for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumParticles; ++ParticleIdx)
 			{
+				// 0番目は固定点
+				if (ParticleIdx == 0)
+				{
+					continue;
+				}
+
 				ApplyDistanceConstraint(ParticleIdx);
 				ApplyRopeBlockersCollisionConstraint(ParticleIdx, InFrameExeCount);
 				ApplyWallCollisionConstraint(ParticleIdx);
@@ -150,11 +163,7 @@ void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 
 void ARopeSimulatorCPU::ApplyDistanceConstraint(int32 ParticleIdx)
 {
-	// 0番目は固定点
-	if (ParticleIdx == 0)
-	{
-		return;
-	}
+	FVector Move = FVector::ZeroVector;
 
 	// Parent-Self
 	{
@@ -162,15 +171,7 @@ void ARopeSimulatorCPU::ApplyDistanceConstraint(int32 ParticleIdx)
 		const FVector& ParentToSelfDir = ParentToSelf.GetSafeNormal();
 		float DiffLength = ParentToSelf.Size() - RestLength;
 
-		if (ParticleIdx == 1)
-		{
-			Positions[ParticleIdx] -= ParentToSelfDir * DiffLength;
-		}
-		else
-		{
-			Positions[ParticleIdx - 1] += ParentToSelfDir * DiffLength * 0.5f;
-			Positions[ParticleIdx] -= ParentToSelfDir * DiffLength * 0.5f;
-		}
+		Move -= ParentToSelfDir * DiffLength;
 	}
 
 	// Self-Child
@@ -180,9 +181,10 @@ void ARopeSimulatorCPU::ApplyDistanceConstraint(int32 ParticleIdx)
 		const FVector& ChildToSelfDir = ChildToSelf.GetSafeNormal();
 		float DiffLength = ChildToSelf.Size() - RestLength;
 
-		Positions[ParticleIdx + 1] += ChildToSelfDir * DiffLength * 0.5f;
-		Positions[ParticleIdx] -= ChildToSelfDir * DiffLength * 0.5f;
+		Move -= ChildToSelfDir * DiffLength;
 	}
+
+	Positions[ParticleIdx] += Move * 0.5f; // 0.5fで平均している
 }
 
 void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount)
@@ -208,6 +210,12 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 			{
 				for (int32 ParticleIdx = NumThreadParticles * ThreadIndex; ParticleIdx < NumThreadParticles * (ThreadIndex + 1) && ParticleIdx < NumParticles; ++ParticleIdx)
 				{
+					// 0番目は固定点
+					if (ParticleIdx == 0)
+					{
+						continue;
+					}
+
 					if (CollisionRestitution > KINDA_SMALL_NUMBER || CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 					{
 						ApplyRopeBlockersVelocityConstraint(ParticleIdx, DeltaSeconds, SubStepDeltaSeconds, SubStepCount);
