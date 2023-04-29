@@ -92,17 +92,16 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 			// このアクタはEndConstraintActorの物理シミュレーションの影響を遅延なくとりこむために
 			// TickGroup = TG_PostPhysicsにしてるので影響は次のフレームからになるがしょうがない。
 			const FVector& RootToEnd = (Positions[NumParticles - 1] - Positions[0]);
-			float MaxLength = (NumParticles - 1) * RestLength; // 毎フレーム計算する必要はないがキャッシュしたくないので
-			if (RootToEnd.SizeSquared() > MaxLength * MaxLength)
+			float OverLength = RootToEnd.Size() - (NumParticles - 1) * RestLength;
+			if (OverLength > 0.0f)
 			{
 				// RootComponentがUPrimitiveComponent派生のときだけに限定
 				UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(EndConstraintActor->GetRootComponent());
 				if (PrimitiveComponent != nullptr)
 				{
 					const FVector& RootToEndDir = RootToEnd.GetSafeNormal();
-					// 質量が反発後の速度に影響しないように速度変化量を指定する
-					// もともとの速度を打ち消し、最終的にAfterCollisionVelocityになるだけの変化量
-					const FVector& AddVelocity = -RootToEndDir * (FVector::DotProduct(PrimitiveComponent->GetPhysicsLinearVelocity(), RootToEndDir) + AfterCollisionVelocity);
+					// めりこみに応じた速度変化量を指定する
+					const FVector& AddVelocity = -RootToEndDir * OverLength * ImpulseVelocityPerOver;
 					PrimitiveComponent->AddImpulse(AddVelocity, NAME_None, true);
 					// TODO:本来はソケットを指定してそこに速度を与えることで重心周りの回転の作用も与えないと不自然になる
 				}

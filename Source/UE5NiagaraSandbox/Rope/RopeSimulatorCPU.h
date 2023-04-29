@@ -108,7 +108,7 @@ private:
 	float EndConstraintRadius = 25.0f;
 
 	UPROPERTY(EditAnywhere)
-	float AfterCollisionVelocity = 100.0f;
+	float ImpulseVelocityPerOver = 1.0f;
 
 private:
 	struct FCollisionCandidate
