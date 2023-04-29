@@ -72,15 +72,41 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 
 	if (DeltaSeconds > KINDA_SMALL_NUMBER)
 	{
-		// EndConstraintActorが設定されていれば末端をコンストレイント
 		if (EndConstraintActor != nullptr)
 		{
+			//
+			// EndConstraintActorが設定されていれば末端をコンストレイント
+			//
+
 			// とりあえずGetActorUpVector()にEndConstraintRadiusだけ離れた位置にコンストレイントさせる形にする
 			const FVector& EndConstraintedPos = EndConstraintActor->GetActorLocation() + EndConstraintActor->GetActorUpVector() * EndConstraintRadius;
 
 			// テレポートにあたるので、Prev系の変数も初期化し、速度の効果を出さない
 			PrevCurrentIterationPositions[NumParticles - 1] = PrevPositions[NumParticles - 1] = Positions[NumParticles - 1] = InvActorTransform.TransformPosition(EndConstraintedPos);
 			PrevSolveVelocities[NumParticles - 1] = PrevConstraintSolveVelocities[NumParticles - 1] = Velocities[NumParticles - 1] = FVector::ZeroVector;
+
+			//
+			// ロープが伸びきる状態になっていたらEndConstraintActorにルートの方向にインパルスを与える。
+			//
+
+			// このアクタはEndConstraintActorの物理シミュレーションの影響を遅延なくとりこむために
+			// TickGroup = TG_PostPhysicsにしてるので影響は次のフレームからになるがしょうがない。
+			const FVector& RootToEnd = (Positions[NumParticles - 1] - Positions[0]);
+			float MaxLength = (NumParticles - 1) * RestLength; // 毎フレーム計算する必要はないがキャッシュしたくないので
+			if (RootToEnd.SizeSquared() > MaxLength * MaxLength)
+			{
+				// RootComponentがUPrimitiveComponent派生のときだけに限定
+				UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(EndConstraintActor->GetRootComponent());
+				if (PrimitiveComponent != nullptr)
+				{
+					const FVector& RootToEndDir = RootToEnd.GetSafeNormal();
+					// 質量が反発後の速度に影響しないように速度変化量を指定する
+					// もともとの速度を打ち消し、最終的にAfterCollisionVelocityになるだけの変化量
+					const FVector& AddVelocity = -RootToEndDir * (FVector::DotProduct(PrimitiveComponent->GetPhysicsLinearVelocity(), RootToEndDir) + AfterCollisionVelocity);
+					PrimitiveComponent->AddImpulse(AddVelocity, NAME_None, true);
+					// TODO:本来はソケットを指定してそこに速度を与えることで重心周りの回転の作用も与えないと不自然になる
+				}
+			}
 		}
 
 		// DeltaSecondsの値の変動に関わらず、シミュレーションに使うサブステップタイムは固定とする
