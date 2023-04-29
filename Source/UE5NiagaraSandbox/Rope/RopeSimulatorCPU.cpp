@@ -79,10 +79,10 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 			//
 
 			// とりあえずGetActorUpVector()にEndConstraintRadiusだけ離れた位置にコンストレイントさせる形にする
-			const FVector& EndConstraintedPos = EndConstraintActor->GetActorLocation() + EndConstraintActor->GetActorUpVector() * EndConstraintRadius;
+			const FVector& EndConstraintedPosWS = EndConstraintActor->GetActorLocation() + EndConstraintActor->GetActorUpVector() * EndConstraintRadius;
 
 			// テレポートにあたるので、Prev系の変数も初期化し、速度の効果を出さない
-			PrevCurrentIterationPositions[NumParticles - 1] = PrevPositions[NumParticles - 1] = Positions[NumParticles - 1] = InvActorTransform.TransformPosition(EndConstraintedPos);
+			PrevCurrentIterationPositions[NumParticles - 1] = PrevPositions[NumParticles - 1] = Positions[NumParticles - 1] = InvActorTransform.TransformPosition(EndConstraintedPosWS);
 			PrevSolveVelocities[NumParticles - 1] = PrevConstraintSolveVelocities[NumParticles - 1] = Velocities[NumParticles - 1] = FVector::ZeroVector;
 
 			//
@@ -101,9 +101,9 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 				{
 					const FVector& RootToEndDir = RootToEnd.GetSafeNormal();
 					// めりこみに応じた速度変化量を指定する
+					// TODO:FrameRateを使っていないし、フレームレートに硬さが依存してしまうが妥協する
 					const FVector& AddVelocity = -RootToEndDir * OverLength * ImpulseVelocityPerOver;
-					PrimitiveComponent->AddImpulse(AddVelocity, NAME_None, true);
-					// TODO:本来はソケットを指定してそこに速度を与えることで重心周りの回転の作用も与えないと不自然になる
+					PrimitiveComponent->AddVelocityChangeImpulseAtLocation(AddVelocity, EndConstraintedPosWS);
 				}
 			}
 		}
