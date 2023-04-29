@@ -63,14 +63,6 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 	NumThreadParticles = (NumParticles + NumThreads - 1) / NumThreads;
 }
 
-void ARopeSimulatorCPU::SetEndPosition(const FVector& Position)
-{
-	// テレポートにあたるので、Prev系の変数も初期化し、速度の効果を出さない
-	PrevCurrentIterationPositions[NumParticles - 1] = Positions[NumParticles - 1] = GetActorTransform().Inverse().TransformPosition(Position); // Tick()より先に呼ばれうるのでInvActorTransformを使わない
-	PrevSolveVelocities[NumParticles - 1] = PrevConstraintSolveVelocities[NumParticles - 1] = Velocities[NumParticles - 1] = FVector::ZeroVector;
-	// Orientationsは最後の向きを計算する工程に任せる
-}
-
 void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -80,6 +72,17 @@ void ARopeSimulatorCPU::Tick(float DeltaSeconds)
 
 	if (DeltaSeconds > KINDA_SMALL_NUMBER)
 	{
+		// EndConstraintActorが設定されていれば末端をコンストレイント
+		if (EndConstraintActor != nullptr)
+		{
+			// とりあえずGetActorUpVector()にEndConstraintRadiusだけ離れた位置にコンストレイントさせる形にする
+			const FVector& EndConstraintedPos = EndConstraintActor->GetActorLocation() + EndConstraintActor->GetActorUpVector() * EndConstraintRadius;
+
+			// テレポートにあたるので、Prev系の変数も初期化し、速度の効果を出さない
+			PrevCurrentIterationPositions[NumParticles - 1] = PrevPositions[NumParticles - 1] = Positions[NumParticles - 1] = InvActorTransform.TransformPosition(EndConstraintedPos);
+			PrevSolveVelocities[NumParticles - 1] = PrevConstraintSolveVelocities[NumParticles - 1] = Velocities[NumParticles - 1] = FVector::ZeroVector;
+		}
+
 		// DeltaSecondsの値の変動に関わらず、シミュレーションに使うサブステップタイムは固定とする
 		float FixedDeltaSeconds = 1.0f / FrameRate;
 		float SubStepDeltaSeconds = FixedDeltaSeconds / NumSubStep;
@@ -168,8 +171,8 @@ void ARopeSimulatorCPU::Integrate(int32 ParticleIdx, float SubStepDeltaSeconds)
 		return;
 	}
 
-	// bConstraintEndPosition==trueのときは末端も固定
-	if (bConstraintEndPosition && (ParticleIdx == NumParticles - 1))
+	// 末端が固定されているとき
+	if ((EndConstraintActor != nullptr) && (ParticleIdx == NumParticles - 1))
 	{
 		return;
 	}
@@ -196,8 +199,8 @@ void ARopeSimulatorCPU::SolvePositionConstraint(int32 InFrameExeCount)
 					continue;
 				}
 
-				// bConstraintEndPosition==trueのときは末端も固定
-				if (bConstraintEndPosition && (ParticleIdx == NumParticles - 1))
+				// 末端が固定されているとき
+				if ((EndConstraintActor != nullptr) && (ParticleIdx == NumParticles - 1))
 				{
 					continue;
 				}
@@ -265,8 +268,8 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 						continue;
 					}
 
-					// bConstraintEndPosition==trueのときは末端も固定
-					if (bConstraintEndPosition && (ParticleIdx == NumParticles - 1))
+					// 末端が固定されているとき
+					if ((EndConstraintActor != nullptr) && (ParticleIdx == NumParticles - 1))
 					{
 						continue;
 					}
@@ -686,6 +689,8 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 ARopeSimulatorCPU::ARopeSimulatorCPU()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	// EndConstraintActorの物理シミュレーションが終わった後にその位置に応じてシミュレーションしたいので
+	PrimaryActorTick.TickGroup = TG_PostPhysics;
 
 	NiagaraComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("NiagaraComponent0"));
 

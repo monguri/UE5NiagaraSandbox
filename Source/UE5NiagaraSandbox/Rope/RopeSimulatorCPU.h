@@ -102,10 +102,10 @@ private:
 	TArray<TEnumAsByte<EObjectTypeQuery>> OverlapQueryObjectTypes;
 
 	UPROPERTY(EditAnywhere)
-	bool bConstraintEndPosition = false;
+	AActor* EndConstraintActor = nullptr;
 
-	UFUNCTION(BlueprintCallable)
-	void SetEndPosition(const FVector& Position);
+	UPROPERTY(EditAnywhere)
+	float EndConstraintRadius = 25.0f;
 
 private:
 	struct FCollisionCandidate
