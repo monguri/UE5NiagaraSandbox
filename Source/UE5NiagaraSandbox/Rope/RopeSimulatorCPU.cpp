@@ -586,6 +586,88 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 			continue;
 		}
 
+		UBoxComponent* BoxComp = Cast<UBoxComponent>(CollisionPose.Key.Get());
+		if (BoxComp != nullptr)
+		{
+			// FKBoxElem::GetClosestPointAndNormalを参考にしている
+			FVector BoxHalfExtent = BoxComp->GetScaledBoxExtent();
+
+			// 球とBoxの当たり判定だと球がBoxの中に入ったかどうかで分岐して面倒なので、Boxを球の半径だけ大きくして点とBoxの当たり判定にする
+			BoxHalfExtent += FVector(RopeRadius);
+
+			// Boxとの当たり判定ではBoxのローカル座標系で計算したほうがいい
+			FTransform BoxTM = PrevPose;
+			// イテレーションごとの位置補間は線形補間で行う
+			BoxTM.BlendWith(Pose, SubStepAlpha);
+			const FVector& BoxLocalPosition = BoxTM.InverseTransformPositionNoScale(Positions[ParticleIdx]);
+
+			bool bIsInside = BoxLocalPosition.X > -BoxHalfExtent.X && BoxLocalPosition.X < BoxHalfExtent.X && BoxLocalPosition.Y > -BoxHalfExtent.Y && BoxLocalPosition.Y < BoxHalfExtent.Y && BoxLocalPosition.Z > -BoxHalfExtent.Z && BoxLocalPosition.Z < BoxHalfExtent.Z;
+			if (bIsInside)
+			{
+				float DistToX = BoxHalfExtent.X - FMath::Abs(BoxLocalPosition.X);
+				float DistToY = BoxHalfExtent.Y - FMath::Abs(BoxLocalPosition.Y);
+				float DistToZ = BoxHalfExtent.Z - FMath::Abs(BoxLocalPosition.Z);
+
+				FVector ClosestLocalPosition = BoxLocalPosition;
+				FVector ImpactNormal = FVector::ZeroVector;
+				if (DistToX < DistToY)
+				{
+					if (DistToX < DistToZ)
+					{
+						float Sign = BoxLocalPosition.X > 0.0f ? 1.0f : -1.0f;
+						ClosestLocalPosition.X = BoxHalfExtent.X * Sign;
+						ImpactNormal = FVector::XAxisVector * Sign;
+					}
+					else
+					{
+						float Sign = BoxLocalPosition.Z > 0.0f ? 1.0f : -1.0f;
+						ClosestLocalPosition.Z = BoxHalfExtent.Z * Sign;
+						ImpactNormal = FVector::ZAxisVector * Sign;
+					}
+				}
+				else // DistToY <= DistToX
+				{
+					if (DistToY < DistToZ)
+					{
+						float Sign = BoxLocalPosition.Y > 0.0f ? 1.0f : -1.0f;
+						ClosestLocalPosition.Y = BoxHalfExtent.Y * Sign;
+						ImpactNormal = FVector::YAxisVector * Sign;
+					}
+					else
+					{
+						float Sign = BoxLocalPosition.Z > 0.0f ? 1.0f : -1.0f;
+						ClosestLocalPosition.Z = BoxHalfExtent.Z * Sign;
+						ImpactNormal = FVector::ZAxisVector * Sign;
+					}
+				}
+
+				// インパクトポイントの速度を求める
+				const FVector& CenterToClosestPos = BoxTM.GetRotation().RotateVector(ClosestLocalPosition);
+				const FQuat& RotDiff = Pose.GetRotation() * PrevPose.GetRotation().Inverse();
+				const FVector& PrevCenterToClosestPos = RotDiff.UnrotateVector(CenterToClosestPos);
+				const FVector& CollisionImpactPointVelocity = ((Pose.GetLocation() + CenterToClosestPos) - (PrevPose.GetLocation() + PrevCenterToClosestPos)) / DeltaSeconds;
+
+				const FVector& PrevSolveRelativeVelocity = PrevSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
+				ImpactNormal = BoxTM.TransformVectorNoScale(ImpactNormal);
+
+				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
+				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
+				{
+					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
+					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
+					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
+				}
+
+				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
+				{
+					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
+					float ForceNormalLen = FMath::Abs(Accelerations[ParticleIdx] | ImpactNormal);
+					float PrevSolveRelativeVelocityTangentLen = PrevSolveRelativeVelocityTangent.Size();
+					Velocities[ParticleIdx] -= PrevSolveRelativeVelocityTangent / FMath::Max(PrevSolveRelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * CollisionDynamicFriction * ForceNormalLen, PrevSolveRelativeVelocityTangentLen);
+				}
+			}
+		}
+
 		UCapsuleComponent* CapsuleComp = Cast<UCapsuleComponent>(CollisionPose.Key.Get());
 		if (CapsuleComp != nullptr)
 		{
