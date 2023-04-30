@@ -5,6 +5,7 @@
 #include "Components/BillboardComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
@@ -369,7 +370,7 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 		// イテレーションごとの位置補間は線形補間で行う
 		const FVector& CollisionCenter = FMath::Lerp(PrevPose.GetLocation(), Pose.GetLocation(), FrameExeAlpha);
 
-		// USphereComponentとUCapsuleComponent以外は今のところ非対応
+		// USphereComponentとUBoxComponentとUCapsuleComponent以外は今のところ非対応
 		const USphereComponent* SphereComp = Cast<const USphereComponent>(CollisionPose.Key.Get());
 		if (SphereComp != nullptr)
 		{
@@ -381,12 +382,62 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 			continue;
 		}
 
+		const UBoxComponent* BoxComp = Cast<const UBoxComponent>(CollisionPose.Key.Get());
+		if (BoxComp != nullptr)
+		{
+			// FKBoxElem::GetClosestPointAndNormalを参考にしている
+			FVector BoxHalfExtent = BoxComp->GetScaledBoxExtent();
+
+			// 球とBoxの当たり判定だと球がBoxの中に入ったかどうかで分岐して面倒なので、Boxを球の半径だけ大きくして点とBoxの当たり判定にする
+			BoxHalfExtent += FVector(RopeRadius);
+
+			// Boxとの当たり判定ではBoxのローカル座標系で計算したほうがいい
+			FTransform BoxTM = PrevPose;
+			// イテレーションごとの位置補間は線形補間で行う
+			BoxTM.BlendWith(Pose, FrameExeAlpha);
+			const FVector& BoxLocalPosition = BoxTM.InverseTransformPositionNoScale(Positions[ParticleIdx]);
+
+			bool bIsInside = BoxLocalPosition.X > -BoxHalfExtent.X && BoxLocalPosition.X < BoxHalfExtent.X && BoxLocalPosition.Y > -BoxHalfExtent.Y && BoxLocalPosition.Y < BoxHalfExtent.Y && BoxLocalPosition.Z > -BoxHalfExtent.Z && BoxLocalPosition.Z < BoxHalfExtent.Z;
+			if (bIsInside)
+			{
+				float DistToX = BoxHalfExtent.X - FMath::Abs(BoxLocalPosition.X);
+				float DistToY = BoxHalfExtent.Y - FMath::Abs(BoxLocalPosition.Y);
+				float DistToZ = BoxHalfExtent.Z - FMath::Abs(BoxLocalPosition.Z);
+
+				FVector ClosestLocalPosition = BoxLocalPosition;
+				if (DistToX < DistToY)
+				{
+					if (DistToX < DistToZ)
+					{
+						ClosestLocalPosition.X = BoxLocalPosition.X > 0.0f ? BoxHalfExtent.X : -BoxHalfExtent.X;
+					}
+					else
+					{
+						ClosestLocalPosition.Z = BoxLocalPosition.Z > 0.0f ? BoxHalfExtent.Z : -BoxHalfExtent.Z;
+					}
+				}
+				else // DistToY <= DistToX
+				{
+					if (DistToY < DistToZ)
+					{
+						ClosestLocalPosition.Y = BoxLocalPosition.Y > 0.0f ? BoxHalfExtent.Y : -BoxHalfExtent.Y;
+					}
+					else
+					{
+						ClosestLocalPosition.Z = BoxLocalPosition.Z > 0.0f ? BoxHalfExtent.Z : -BoxHalfExtent.Z;
+					}
+				}
+
+				Positions[ParticleIdx] += (BoxTM.TransformPositionNoScale(ClosestLocalPosition) - Positions[ParticleIdx]) * CollisionProjectionAlpha;
+			}
+		}
+
 		UCapsuleComponent* CapsuleComp = Cast<UCapsuleComponent>(CollisionPose.Key.Get());
 		if (CapsuleComp != nullptr)
 		{
-			FTransform CapsuleTM = Pose;
+			FTransform CapsuleTM = PrevPose;
 			// イテレーションごとの位置補間は線形補間で行う
-			CapsuleTM.BlendWith(PrevPose, FrameExeAlpha);
+			CapsuleTM.BlendWith(Pose, FrameExeAlpha);
 
 			float HalfHeight = CapsuleComp->GetScaledCapsuleHalfHeight_WithoutHemisphere();
 			const FVector& ZAxis = CapsuleTM.GetUnitAxis(EAxis::Type::Z);
