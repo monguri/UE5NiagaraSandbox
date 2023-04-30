@@ -589,9 +589,9 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 		UCapsuleComponent* CapsuleComp = Cast<UCapsuleComponent>(CollisionPose.Key.Get());
 		if (CapsuleComp != nullptr)
 		{
-			FTransform CapsuleTM = Pose;
+			FTransform CapsuleTM = PrevPose;
 			// イテレーションごとの位置補間は線形補間で行う
-			CapsuleTM.BlendWith(PrevPose, SubStepAlpha);
+			CapsuleTM.BlendWith(Pose, SubStepAlpha);
 
 			float HalfHeight = CapsuleComp->GetScaledCapsuleHalfHeight_WithoutHemisphere();
 			const FVector& ZAxis = CapsuleTM.GetUnitAxis(EAxis::Type::Z);
