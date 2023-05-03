@@ -11,7 +11,7 @@ public class UE5NiagaraSandbox : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "HeadMountedDisplay", "EnhancedInput" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
-			"Niagara"
+			"Niagara", "Chaos"
 		});
 	}
 }

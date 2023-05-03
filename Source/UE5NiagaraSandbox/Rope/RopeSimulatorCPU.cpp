@@ -8,6 +8,8 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraDataInterfaceArrayFunctionLibrary.h"
 #include "Async/ParallelFor.h"
+#include "Chaos/Convex.h"
+#include "PhysicsInterfaceTypesCore.h"
 
 void ARopeSimulatorCPU::PreInitializeComponents()
 {
@@ -208,15 +210,10 @@ void ARopeSimulatorCPU::UpdateRopeBlockers()
 			CacheAggGeom->SphylElems[i] = OriginalAggGeom.SphylElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
 		}
 
-		// FKConvexElemにはGetFinalScaled()がないのでFKConvexElem::DrawElemWireを参考に変換する
-		// TODO:この処理も重いと思われる
+		// FKConvexElemはTransformを保持する形なので直接保存しておく
 		for (int32 i = 0; i < OriginalAggGeom.ConvexElems.Num(); ++i)
 		{
-			// TODO:VertexDataも変わってない前提
-			for (int32 j = 0; j < CacheAggGeom->ConvexElems[i].VertexData.Num(); j++)
-			{
-				CacheAggGeom->ConvexElems[i].VertexData[j] = ActorTM.TransformPosition(OriginalAggGeom.ConvexElems[i].VertexData[j]);
-			}
+			CacheAggGeom->ConvexElems[i].SetTransform(ActorTM);
 		}
 	}
 }
@@ -501,6 +498,38 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 			if (DistSquared < LimitDistance * LimitDistance)
 			{
 				Positions[ParticleIdx] += (RopeCenter - ClosestPoint).GetSafeNormal() * (LimitDistance - (RopeCenter - ClosestPoint).Size()) * CollisionProjectionAlpha;
+			}
+		}
+
+		for (int32 i = 0; i < AggGeom.ConvexElems.Num(); ++i)
+		{
+			const FKConvexElem& ConvexElem = AggGeom.ConvexElems[i];
+			const FKConvexElem& PrevConvexElem = PrevAggGeom.ConvexElems[i];
+
+			FTransform ConvexTM = PrevConvexElem.GetTransform();
+			// イテレーションごとの位置補間は線形補間で行う
+			ConvexTM.BlendWith(ConvexElem.GetTransform(), FrameExeAlpha);
+
+			// TODO:それなりの重さ
+			FKConvexElem BlendedConvexElem = ConvexElem;
+			BlendedConvexElem.SetTransform(ConvexTM);
+
+			// FKConvexElem::GetClosestPointAndNormal()を参考にする
+			float MinScale, MinScaleAbs;
+			FVector Scale3DAbs;
+			SetupNonUniformHelper(BlendedConvexElem.GetTransform().GetScale3D(), MinScale, MinScaleAbs, Scale3DAbs);
+
+			const FVector& LocalPosition = BlendedConvexElem.GetTransform().InverseTransformPositionNoScale(RopeCenter);
+			if (BlendedConvexElem.GetChaosConvexMesh())
+			{
+				Chaos::FVec3 OutNormal;
+				Chaos::FReal Phi = BlendedConvexElem.GetChaosConvexMesh()->PhiWithNormalScaled(LocalPosition, Scale3DAbs, OutNormal);
+				const FVector& Normal = BlendedConvexElem.GetTransform().TransformVectorNoScale(OutNormal);
+				float Distance = Phi;
+				if (Distance < RopeRadius)
+				{
+					Positions[ParticleIdx] += Normal * (RopeRadius - Distance) * CollisionProjectionAlpha;
+				}
 			}
 		}
 	}
