@@ -187,7 +187,7 @@ void ARopeSimulatorCPU::UpdateRopeBlockers()
 
 		const FKAggregateGeom& OriginalAggGeom = Primitive->GetBodyInstance()->GetBodySetup()->AggGeom;
 		// マップにはFKAggregateGeomのコピーを保存
-		RopeBlockerAggGeomMap.Add(Primitive, Primitive->GetBodyInstance()->GetBodySetup()->AggGeom);
+		RopeBlockerAggGeomMap.Add(Primitive, OriginalAggGeom);
 
 		// FKAggregateGeomのコピーコンストラクトを少なくしたいのでマップにAddしてから編集する
 		// TODO:コピーは結構重いだろう。FKConvexElemがあるので
@@ -214,6 +214,21 @@ void ARopeSimulatorCPU::UpdateRopeBlockers()
 		for (int32 i = 0; i < OriginalAggGeom.ConvexElems.Num(); ++i)
 		{
 			CacheAggGeom->ConvexElems[i].SetTransform(ActorTM);
+			// FKConvexElem::SetChaosConvexMesh()は所有権の移動になるので、一から作り直すしかない
+			// UOceanCollisionComponent::UpdateBodySetup()、UOceanCollisionComponent::UpdateBodySetup()が似たようなことをやっている
+			int32 NumHullVerts = CacheAggGeom->ConvexElems[i].VertexData.Num();
+			TArray<Chaos::FConvex::FVec3Type> ConvexVertices;
+			ConvexVertices.SetNum(NumHullVerts);
+			// TODO:これ、TArray同士のコピーなんで=でダメ？
+			for (int32 VertIndex = 0; VertIndex < NumHullVerts; ++VertIndex)
+			{
+				ConvexVertices[VertIndex] = CacheAggGeom->ConvexElems[i].VertexData[VertIndex];
+			}
+
+			TSharedPtr<Chaos::FConvex, ESPMode::ThreadSafe> ChaosConvex = MakeShared<Chaos::FConvex, ESPMode::ThreadSafe>(ConvexVertices, 0.0f);
+
+			//TODO:重い。Chaos::FConvexBuilder::BuildIndices()を走らせている
+			CacheAggGeom->ConvexElems[i].SetChaosConvexMesh(MoveTemp(ChaosConvex));
 		}
 	}
 }
@@ -391,7 +406,7 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 	// そもそも物理アセット、あるいはプレイヤーのカプセルがこのアクタと交差してなければコリジョン計算の必要すらない。
 	// TODO:現フレームの現イテレーションでのコリジョンの位置と向きを前フレームのポーズでのコリジョン位置と現フレームのポーズでのコリジョン位置から
 	// 補間で求めているが、それをパーティクルごとにやるのはもったいない。キャッシュしたいね。キャッシュもイテレーションごとにやる必要出るが。
-	for (TPair<TWeakObjectPtr<const UPrimitiveComponent>, FKAggregateGeom> Pair : RopeBlockerAggGeomMap)
+	for (const TPair<TWeakObjectPtr<const UPrimitiveComponent>, FKAggregateGeom>& Pair : RopeBlockerAggGeomMap)
 	{
 		if (Pair.Key == nullptr)
 		{
@@ -510,21 +525,17 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 			// イテレーションごとの位置補間は線形補間で行う
 			ConvexTM.BlendWith(ConvexElem.GetTransform(), FrameExeAlpha);
 
-			// TODO:それなりの重さ
-			FKConvexElem BlendedConvexElem = ConvexElem;
-			BlendedConvexElem.SetTransform(ConvexTM);
-
 			// FKConvexElem::GetClosestPointAndNormal()を参考にする
 			float MinScale, MinScaleAbs;
 			FVector Scale3DAbs;
-			SetupNonUniformHelper(BlendedConvexElem.GetTransform().GetScale3D(), MinScale, MinScaleAbs, Scale3DAbs);
+			SetupNonUniformHelper(ConvexTM.GetScale3D(), MinScale, MinScaleAbs, Scale3DAbs);
 
-			const FVector& LocalPosition = BlendedConvexElem.GetTransform().InverseTransformPositionNoScale(RopeCenter);
-			if (BlendedConvexElem.GetChaosConvexMesh())
+			const FVector& LocalPosition = ConvexTM.InverseTransformPositionNoScale(RopeCenter);
+			if (ConvexElem.GetChaosConvexMesh())
 			{
 				Chaos::FVec3 OutNormal;
-				Chaos::FReal Phi = BlendedConvexElem.GetChaosConvexMesh()->PhiWithNormalScaled(LocalPosition, Scale3DAbs, OutNormal);
-				const FVector& Normal = BlendedConvexElem.GetTransform().TransformVectorNoScale(OutNormal);
+				Chaos::FReal Phi = ConvexElem.GetChaosConvexMesh()->PhiWithNormalScaled(LocalPosition, Scale3DAbs, OutNormal);
+				const FVector& Normal = ConvexTM.TransformVectorNoScale(OutNormal);
 				float Distance = Phi;
 				if (Distance < RopeRadius)
 				{
@@ -618,7 +629,7 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
 
-	for (TPair<TWeakObjectPtr<const UPrimitiveComponent>, FKAggregateGeom> Pair : RopeBlockerAggGeomMap)
+	for (const TPair<TWeakObjectPtr<const UPrimitiveComponent>, FKAggregateGeom>& Pair : RopeBlockerAggGeomMap)
 	{
 		if (Pair.Key == nullptr)
 		{
