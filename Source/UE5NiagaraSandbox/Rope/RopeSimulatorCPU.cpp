@@ -190,28 +190,20 @@ void ARopeSimulatorCPU::UpdateRopeBlockers()
 		// FKAggregateGeomのコピーコンストラクトを少なくしたいのでマップにAddしてから編集する
 		FKAggregateGeom* CacheAggGeom = RopeBlockerAggGeomMap.Find(Primitive);
 
+		// キャッシュするFKAggregateGeomにはActorのScaleを適用しておく
 		for (int32 i = 0; i < OriginalAggGeom.SphereElems.Num(); ++i)
 		{
-			// CollisionGeometryVisualization.cppのUE::PhysicsTools::InitializePreviewGeometryLines()を参考にしている
 			CacheAggGeom->SphereElems[i] = OriginalAggGeom.SphereElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
-			CacheAggGeom->SphereElems[i].Radius = OriginalAggGeom.SphereElems[i].Radius * ActorTM.GetScale3D().GetAbsMax(); 
 		}
 
 		for (int32 i = 0; i < OriginalAggGeom.BoxElems.Num(); ++i)
 		{
-			// CollisionGeometryVisualization.cppのUE::PhysicsTools::InitializePreviewGeometryLines()を参考にしている
 			CacheAggGeom->BoxElems[i] = OriginalAggGeom.BoxElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
-			CacheAggGeom->BoxElems[i].X = OriginalAggGeom.BoxElems[i].X * ActorTM.GetScale3D().X;
-			CacheAggGeom->BoxElems[i].Y = OriginalAggGeom.BoxElems[i].Y * ActorTM.GetScale3D().Y;
-			CacheAggGeom->BoxElems[i].Z = OriginalAggGeom.BoxElems[i].Z * ActorTM.GetScale3D().Z;
 		}
 
 		for (int32 i = 0; i < OriginalAggGeom.SphylElems.Num(); ++i)
 		{
-			// CollisionGeometryVisualization.cppのUE::PhysicsTools::InitializePreviewGeometryLines()を参考にしている
 			CacheAggGeom->SphylElems[i] = OriginalAggGeom.SphylElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
-			CacheAggGeom->SphylElems[i].Radius = OriginalAggGeom.SphylElems[i].GetScaledRadius(ActorTM.GetScale3D());
-			CacheAggGeom->SphylElems[i].Length = OriginalAggGeom.SphylElems[i].GetScaledCylinderLength(ActorTM.GetScale3D());
 		}
 	}
 }
