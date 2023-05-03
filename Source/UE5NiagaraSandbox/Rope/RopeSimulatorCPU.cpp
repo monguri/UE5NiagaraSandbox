@@ -188,9 +188,11 @@ void ARopeSimulatorCPU::UpdateRopeBlockers()
 		RopeBlockerAggGeomMap.Add(Primitive, Primitive->GetBodyInstance()->GetBodySetup()->AggGeom);
 
 		// FKAggregateGeomのコピーコンストラクトを少なくしたいのでマップにAddしてから編集する
+		// TODO:コピーは結構重いだろう。FKConvexElemがあるので
 		FKAggregateGeom* CacheAggGeom = RopeBlockerAggGeomMap.Find(Primitive);
 
-		// キャッシュするFKAggregateGeomにはActorのScaleを適用しておく
+		// キャッシュするFKAggregateGeomにはActorのTransformを先に適用しておく。
+		// PrevRopeBlockerAggGeomMapの状態と各コンストレイントで比較する必要があるため。
 		for (int32 i = 0; i < OriginalAggGeom.SphereElems.Num(); ++i)
 		{
 			CacheAggGeom->SphereElems[i] = OriginalAggGeom.SphereElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
@@ -204,6 +206,17 @@ void ARopeSimulatorCPU::UpdateRopeBlockers()
 		for (int32 i = 0; i < OriginalAggGeom.SphylElems.Num(); ++i)
 		{
 			CacheAggGeom->SphylElems[i] = OriginalAggGeom.SphylElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
+		}
+
+		// FKConvexElemにはGetFinalScaled()がないのでFKConvexElem::DrawElemWireを参考に変換する
+		// TODO:この処理も重いと思われる
+		for (int32 i = 0; i < OriginalAggGeom.ConvexElems.Num(); ++i)
+		{
+			// TODO:VertexDataも変わってない前提
+			for (int32 j = 0; j < CacheAggGeom->ConvexElems[i].VertexData.Num(); j++)
+			{
+				CacheAggGeom->ConvexElems[i].VertexData[j] = ActorTM.TransformPosition(OriginalAggGeom.ConvexElems[i].VertexData[j]);
+			}
 		}
 	}
 }
