@@ -303,6 +303,9 @@ void ARopeSimulatorCPU::SolveStaticFriction(float SubStepDeltaSeconds, int32 Sub
 		// ApplySphereStaticFriction()で並列化のために使用するので初期化しておく
 		PrevConstraintSolvePositions[ParticleIdx] = Positions[ParticleIdx];
 	}
+
+	//TODO:必要になるまでStaticFricionは未実装にしておく。床でStaticFricionが働くと伸びがあっても
+	//治りにくいという問題もある
 }
 
 void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount)
