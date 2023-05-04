@@ -57,6 +57,9 @@ private:
 	float RopeRadius = 1.0f;
 
 	UPROPERTY(EditAnywhere)
+	float RopeRadiusForCollision = 1.1f;
+
+	UPROPERTY(EditAnywhere)
 	float RestLength = 2.7f;
 
 	UPROPERTY(EditAnywhere)
@@ -79,12 +82,6 @@ private:
 
 	UPROPERTY(EditAnywhere)
 	FBox WallBox = FBox(FVector(-150.0f, -150.0f, -150.0f), FVector(150.0f, 150.0f, 150.0f));
-
-	UPROPERTY(EditAnywhere)
-	float CollisionProjectionAlpha = 0.8f;
-
-	UPROPERTY(EditAnywhere)
-	float WallProjectionAlpha = 0.8f;
 
 	UPROPERTY(EditAnywhere)
 	float CollisionDynamicFriction = 0.0f;

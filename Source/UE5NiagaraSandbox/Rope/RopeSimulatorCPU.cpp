@@ -361,41 +361,6 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 	}
 }
 
-namespace
-{
-	bool CalculateRopeToPlaneCollision(const FPlane& RopePlane, const FVector& RopeCenter, float RopeRadius, const FPlane& Plane, FVector& OutDeepestPenetratePoint, float& OutDeepestPenetrateDepth)
-	{
-		FVector PlaneIntersectionLineBasePoint;
-		FVector PlaneIntersectionLineDir;
-		bool bIntersecting = FMath::IntersectPlanes2(PlaneIntersectionLineBasePoint, PlaneIntersectionLineDir, RopePlane, Plane);
-		if (bIntersecting)
-		{
-			FVector ClosestPoint;
-			// 戻り値は使わない
-			// float RopeCenterToIntersectionLineLength =
-			FMath::PointDistToLine(RopeCenter, PlaneIntersectionLineDir, PlaneIntersectionLineBasePoint, ClosestPoint);
-
-			if (Plane.PlaneDot(RopeCenter) < 0.0f)
-			{
-				OutDeepestPenetratePoint = RopeCenter + (RopeCenter - ClosestPoint).GetSafeNormal() * RopeRadius;
-			}
-			else
-			{
-				OutDeepestPenetratePoint = RopeCenter + (ClosestPoint - RopeCenter).GetSafeNormal() * RopeRadius;
-			}
-
-			OutDeepestPenetrateDepth = -Plane.PlaneDot(OutDeepestPenetratePoint);
-		}
-		else
-		{
-			OutDeepestPenetratePoint = RopeCenter;
-			OutDeepestPenetrateDepth = -Plane.PlaneDot(RopeCenter);
-		}
-
-		return (OutDeepestPenetrateDepth > 0.0f);
-	}
-}
-
 void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount)
 {
 	float FrameExeAlpha = (InFrameExeCount + 1) / (NumSubStep * NumIteration);
@@ -426,10 +391,10 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 			// イテレーションごとの位置補間は線形補間で行う
 			const FVector& CollisionCenter = FMath::Lerp(PrevSphereElem.Center, SphereElem.Center, FrameExeAlpha);
 
-			float LimitDistance = RopeRadius + SphereElem.Radius;
+			float LimitDistance = RopeRadiusForCollision + SphereElem.Radius;
 			if ((RopeCenter - CollisionCenter).SizeSquared() < LimitDistance * LimitDistance)
 			{
-				Positions[ParticleIdx] += (RopeCenter - CollisionCenter).GetSafeNormal() * (LimitDistance - (RopeCenter - CollisionCenter).Size()) * CollisionProjectionAlpha;
+				Positions[ParticleIdx] += (RopeCenter - CollisionCenter).GetSafeNormal() * (RopeRadius + SphereElem.Radius - (RopeCenter - CollisionCenter).Size());
 			}
 		}
 
@@ -439,9 +404,9 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 			FKBoxElem BoxElem = AggGeom.BoxElems[i];
 
 			// 球とBoxの当たり判定だと球がBoxの中に入ったかどうかで分岐して面倒なので、Boxを球の半径だけ大きくして点とBoxの当たり判定にする
-			BoxElem.X += RopeRadius * 2;
-			BoxElem.Y += RopeRadius * 2;
-			BoxElem.Z += RopeRadius * 2;
+			BoxElem.X += RopeRadiusForCollision * 2;
+			BoxElem.Y += RopeRadiusForCollision * 2;
+			BoxElem.Z += RopeRadiusForCollision * 2;
 
 			// Boxとの当たり判定ではBoxのローカル座標系で計算したほうがいい
 			FTransform BoxTM = PrevAggGeom.BoxElems[i].GetTransform();
@@ -460,31 +425,36 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 				float DistToY = HalfY - FMath::Abs(BoxLocalPosition.Y);
 				float DistToZ = HalfZ - FMath::Abs(BoxLocalPosition.Z);
 
+				float RopeRadiusAdjustment = RopeRadiusForCollision - RopeRadius;
+				const float GenuineHalfX = HalfX - RopeRadiusAdjustment;
+				const float GenuineHalfY = HalfY - RopeRadiusAdjustment;
+				const float GenuineHalfZ = HalfZ - RopeRadiusAdjustment;
+
 				FVector ClosestLocalPosition = BoxLocalPosition;
 				if (DistToX < DistToY)
 				{
 					if (DistToX < DistToZ)
 					{
-						ClosestLocalPosition.X = BoxLocalPosition.X > 0.0f ? HalfX : -HalfX;
+						ClosestLocalPosition.X = BoxLocalPosition.X > 0.0f ? GenuineHalfX : -GenuineHalfX;
 					}
 					else
 					{
-						ClosestLocalPosition.Z = BoxLocalPosition.Z > 0.0f ? HalfZ : -HalfZ;
+						ClosestLocalPosition.Z = BoxLocalPosition.Z > 0.0f ? GenuineHalfZ : -GenuineHalfZ;
 					}
 				}
 				else // DistToY <= DistToX
 				{
 					if (DistToY < DistToZ)
 					{
-						ClosestLocalPosition.Y = BoxLocalPosition.Y > 0.0f ? HalfY : -HalfY;
+						ClosestLocalPosition.Y = BoxLocalPosition.Y > 0.0f ? GenuineHalfY : -GenuineHalfY;
 					}
 					else
 					{
-						ClosestLocalPosition.Z = BoxLocalPosition.Z > 0.0f ? HalfZ : -HalfZ;
+						ClosestLocalPosition.Z = BoxLocalPosition.Z > 0.0f ? GenuineHalfZ : -GenuineHalfZ;
 					}
 				}
 
-				Positions[ParticleIdx] += (BoxTM.TransformPositionNoScale(ClosestLocalPosition) - RopeCenter) * CollisionProjectionAlpha;
+				Positions[ParticleIdx] += (BoxTM.TransformPositionNoScale(ClosestLocalPosition) - RopeCenter);
 			}
 		}
 
@@ -509,10 +479,10 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 			const FVector& ClosestPoint = FMath::ClosestPointOnSegment(RopeCenter, StartPoint, EndPoint);
 			float DistSquared = (RopeCenter - ClosestPoint).SizeSquared();
 
-			float LimitDistance = RopeRadius + SphylElem.Radius;
+			float LimitDistance = RopeRadiusForCollision + SphylElem.Radius;
 			if (DistSquared < LimitDistance * LimitDistance)
 			{
-				Positions[ParticleIdx] += (RopeCenter - ClosestPoint).GetSafeNormal() * (LimitDistance - (RopeCenter - ClosestPoint).Size()) * CollisionProjectionAlpha;
+				Positions[ParticleIdx] += (RopeCenter - ClosestPoint).GetSafeNormal() * (RopeRadius + SphylElem.Radius - (RopeCenter - ClosestPoint).Size());
 			}
 		}
 
@@ -539,10 +509,10 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 			Chaos::FVec3 OutNormal;
 			Chaos::FReal Phi = ConvexElem.GetChaosConvexMesh()->PhiWithNormalScaled(LocalPosition, Scale3DAbs, OutNormal);
 			float Distance = Phi;
-			if (Distance < RopeRadius)
+			if (Distance < RopeRadiusForCollision)
 			{
 				const FVector& Normal = ConvexTM.TransformVectorNoScale(OutNormal);
-				Positions[ParticleIdx] += Normal * (RopeRadius - Distance) * CollisionProjectionAlpha;
+				Positions[ParticleIdx] += Normal * (RopeRadius - Distance);
 			}
 		}
 	}
@@ -555,56 +525,37 @@ void ARopeSimulatorCPU::ApplyWallCollisionConstraint(int32 ParticleIdx)
 	FVector DeltaPos = FVector::ZeroVector;
 
 	// ブレークポイントをはりやすいようにFMath::Max()でなくifにしている
-	if (((RopeCenter.Z + RopeRadius) - WallBox.Max.Z) > 0.0f)
+	if (((RopeCenter.Z + RopeRadiusForCollision) - WallBox.Max.Z) > 0.0f)
 	{
-		DeltaPos += ((RopeCenter.Z + RopeRadius) - WallBox.Max.Z) * FVector(0.0f, 0.0f, -1.0f) * WallProjectionAlpha;
+		DeltaPos += ((RopeCenter.Z + RopeRadius) - WallBox.Max.Z) * FVector(0.0f, 0.0f, -1.0f);
 	}
 
-	if ((WallBox.Min.Z - (RopeCenter.Z - RopeRadius)) > 0.0f)
+	if ((WallBox.Min.Z - (RopeCenter.Z - RopeRadiusForCollision)) > 0.0f)
 	{
-		DeltaPos += (WallBox.Min.Z - (RopeCenter.Z - RopeRadius)) * FVector(0.0f, 0.0f, 1.0f) * WallProjectionAlpha;
+		DeltaPos += (WallBox.Min.Z - (RopeCenter.Z - RopeRadius)) * FVector(0.0f, 0.0f, 1.0f);
 	}
 
-	if ((WallBox.Min.X - (RopeCenter.X - RopeRadius)) > 0.0f)
+	if ((WallBox.Min.X - (RopeCenter.X - RopeRadiusForCollision)) > 0.0f)
 	{
-		DeltaPos += (WallBox.Min.X - (RopeCenter.X - RopeRadius)) * FVector(1.0f, 0.0f, 0.0f) * WallProjectionAlpha;
+		DeltaPos += (WallBox.Min.X - (RopeCenter.X - RopeRadius)) * FVector(1.0f, 0.0f, 0.0f);
 	}
 
-	if (((RopeCenter.X + RopeRadius) - WallBox.Max.X) > 0.0f)
+	if (((RopeCenter.X + RopeRadiusForCollision) - WallBox.Max.X) > 0.0f)
 	{
-		DeltaPos += ((RopeCenter.X + RopeRadius) - WallBox.Max.X) * FVector(-1.0f, 0.0f, 0.0f) * WallProjectionAlpha;
+		DeltaPos += ((RopeCenter.X + RopeRadius) - WallBox.Max.X) * FVector(-1.0f, 0.0f, 0.0f);
 	}
 
-	if ((WallBox.Min.Y - (RopeCenter.Y - RopeRadius)) > 0.0f)
+	if ((WallBox.Min.Y - (RopeCenter.Y - RopeRadiusForCollision)) > 0.0f)
 	{
-		DeltaPos += (WallBox.Min.Y - (RopeCenter.Y - RopeRadius)) * FVector(0.0f, 1.0f, 0.0f) * WallProjectionAlpha;
+		DeltaPos += (WallBox.Min.Y - (RopeCenter.Y - RopeRadius)) * FVector(0.0f, 1.0f, 0.0f);
 	}
 
-	if (((RopeCenter.Y + RopeRadius) - WallBox.Max.Y) > 0.0f)
+	if (((RopeCenter.Y + RopeRadiusForCollision) - WallBox.Max.Y) > 0.0f)
 	{
-		DeltaPos += ((RopeCenter.Y + RopeRadius) - WallBox.Max.Y) * FVector(0.0f, -1.0f, 0.0f) * WallProjectionAlpha;
+		DeltaPos += ((RopeCenter.Y + RopeRadius) - WallBox.Max.Y) * FVector(0.0f, -1.0f, 0.0f);
 	}
 
 	Positions[ParticleIdx] += DeltaPos;
-}
-
-namespace
-{
-	void SolveDynamicFrictionDeltaVelocity(const FVector& RopeCenter, const FVector& DeepestPenetratePoint, const FVector& ImpactNormal, float WallDynamicFriction, const FVector& Velocity, const FVector& ImpactPointVelocity, const FVector& Acceleration, float SubStepDeltaSeconds, FVector& InOutDeltaVelocity)
-	{
-		const FVector& RopeCenterToDeepestPenetratePoint = DeepestPenetratePoint - RopeCenter;
-
-		// 外積オペレータ^は演算順序が+より優先ではないのに注意
-		const FVector& DeepestPenetratePointRelativeVelocity = Velocity - ImpactPointVelocity;
-		float RelativeVelocityNormal = DeepestPenetratePointRelativeVelocity | ImpactNormal;
-
-		const FVector& RelativeVelocityTangent = Velocity - RelativeVelocityNormal * ImpactNormal;
-		float ForceNormalLen = FMath::Abs(Acceleration | ImpactNormal);
-		float RelativeVelocityTangentLen = RelativeVelocityTangent.Size();
-		const FVector& DeltaVelocity = -RelativeVelocityTangent / FMath::Max(RelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * WallDynamicFriction * ForceNormalLen, RelativeVelocityTangentLen);
-
-		InOutDeltaVelocity += DeltaVelocity;
-	}
 }
 
 void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount)
@@ -634,7 +585,7 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 			const FVector& CollisionCenter = FMath::Lerp(PrevSphereElem.Center, SphereElem.Center, SubStepAlpha);
 			const FVector& CollisionVelocity = (SphereElem.Center - PrevSphereElem.Center) / DeltaSeconds;
 
-			float LimitDistance = RopeRadius + SphereElem.Radius;
+			float LimitDistance = RopeRadiusForCollision + SphereElem.Radius;
 			if ((RopeCenter - CollisionCenter).SizeSquared() < LimitDistance * LimitDistance)
 			{
 				const FVector& PrevSolveRelativeVelocity = PrevSolveVelocities[ParticleIdx] - CollisionVelocity;
@@ -658,9 +609,9 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 			const FKBoxElem& PrevBoxElem = PrevAggGeom.BoxElems[i];
 
 			// 球とBoxの当たり判定だと球がBoxの中に入ったかどうかで分岐して面倒なので、Boxを球の半径だけ大きくして点とBoxの当たり判定にする
-			BoxElem.X += RopeRadius * 2;
-			BoxElem.Y += RopeRadius * 2;
-			BoxElem.Z += RopeRadius * 2;
+			BoxElem.X += RopeRadiusForCollision * 2;
+			BoxElem.Y += RopeRadiusForCollision * 2;
+			BoxElem.Z += RopeRadiusForCollision * 2;
 
 			// Boxとの当たり判定ではワールド基準でなくBoxのローカル座標系で計算したほうがいい
 			FTransform BoxTM = PrevBoxElem.GetTransform();
@@ -679,6 +630,10 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 				float DistToY = HalfY - FMath::Abs(BoxLocalPosition.Y);
 				float DistToZ = HalfZ - FMath::Abs(BoxLocalPosition.Z);
 
+				const float GenuineHalfX = HalfX - RopeRadiusForCollision;
+				const float GenuineHalfY = HalfY - RopeRadiusForCollision;
+				const float GenuineHalfZ = HalfZ - RopeRadiusForCollision;
+
 				FVector ClosestLocalPosition = BoxLocalPosition;
 				FVector ImpactNormal = FVector::ZeroVector;
 				if (DistToX < DistToY)
@@ -686,13 +641,13 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 					if (DistToX < DistToZ)
 					{
 						float Sign = BoxLocalPosition.X > 0.0f ? 1.0f : -1.0f;
-						ClosestLocalPosition.X = HalfX * Sign;
+						ClosestLocalPosition.X = GenuineHalfX * Sign;
 						ImpactNormal = FVector::XAxisVector * Sign;
 					}
 					else
 					{
 						float Sign = BoxLocalPosition.Z > 0.0f ? 1.0f : -1.0f;
-						ClosestLocalPosition.Z = HalfZ * Sign;
+						ClosestLocalPosition.Z = GenuineHalfZ * Sign;
 						ImpactNormal = FVector::ZAxisVector * Sign;
 					}
 				}
@@ -701,13 +656,13 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 					if (DistToY < DistToZ)
 					{
 						float Sign = BoxLocalPosition.Y > 0.0f ? 1.0f : -1.0f;
-						ClosestLocalPosition.Y = HalfY * Sign;
+						ClosestLocalPosition.Y = GenuineHalfY * Sign;
 						ImpactNormal = FVector::YAxisVector * Sign;
 					}
 					else
 					{
 						float Sign = BoxLocalPosition.Z > 0.0f ? 1.0f : -1.0f;
-						ClosestLocalPosition.Z = HalfZ * Sign;
+						ClosestLocalPosition.Z = GenuineHalfZ * Sign;
 						ImpactNormal = FVector::ZAxisVector * Sign;
 					}
 				}
@@ -754,7 +709,7 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 			const FVector& ClosestPoint = FMath::ClosestPointOnSegment(RopeCenter, StartPoint, EndPoint);
 			float DistSquared = (RopeCenter - ClosestPoint).SizeSquared();
 
-			float LimitDistance = RopeRadius + SphylElem.Radius;
+			float LimitDistance = RopeRadiusForCollision + SphylElem.Radius;
 			if (DistSquared < LimitDistance * LimitDistance)
 			{
 				// インパクトポイントの速度を求める
@@ -803,7 +758,7 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 			Chaos::FVec3 OutNormal;
 			Chaos::FReal Phi = ConvexElem.GetChaosConvexMesh()->PhiWithNormalScaled(LocalPosition, Scale3DAbs, OutNormal);
 			float Distance = Phi;
-			if (Distance < RopeRadius)
+			if (Distance < RopeRadiusForCollision)
 			{
 				const FVector& Normal = ConvexTM.TransformVectorNoScale(OutNormal);
 				const FVector& ClosestPoint = RopeCenter - Normal * Distance;
@@ -850,7 +805,7 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 
 	// TODO:もともと壁にもぐっている状態で速度が0のものは反発できないからどうすべきかということに解答が出せていない
 	FVector DeltaVelocity = FVector::ZeroVector;
-	if (((RopeCenter.Z + RopeRadius) - WallBox.Max.Z) > 0.0f)
+	if (((RopeCenter.Z + RopeRadiusForCollision) - WallBox.Max.Z) > 0.0f)
 	{
 		const FVector& Normal = FVector(0.0f, 0.0f, -1.0f);
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
@@ -859,7 +814,7 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 		}
 	}
 
-	if ((WallBox.Min.Z - (RopeCenter.Z - RopeRadius)) > 0.0f)
+	if ((WallBox.Min.Z - (RopeCenter.Z - RopeRadiusForCollision)) > 0.0f)
 	{
 		const FVector& Normal = FVector(0.0f, 0.0f, 1.0f);
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
@@ -868,7 +823,7 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 		}
 	}
 
-	if ((WallBox.Min.X - (RopeCenter.X - RopeRadius)) > 0.0f)
+	if ((WallBox.Min.X - (RopeCenter.X - RopeRadiusForCollision)) > 0.0f)
 	{
 		const FVector& Normal = FVector(1.0f, 0.0f, 0.0f);
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
@@ -877,7 +832,7 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 		}
 	}
 
-	if (((RopeCenter.X + RopeRadius) - WallBox.Max.X) > 0.0f)
+	if (((RopeCenter.X + RopeRadiusForCollision) - WallBox.Max.X) > 0.0f)
 	{
 		const FVector& Normal = FVector(-1.0f, 0.0f, 0.0f);
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
@@ -886,7 +841,7 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 		}
 	}
 
-	if ((WallBox.Min.Y - (RopeCenter.Y - RopeRadius)) > 0.0f)
+	if ((WallBox.Min.Y - (RopeCenter.Y - RopeRadiusForCollision)) > 0.0f)
 	{
 		const FVector& Normal = FVector(0.0f, 1.0f, 0.0f);
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
@@ -895,7 +850,7 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 		}
 	}
 
-	if (((RopeCenter.Y + RopeRadius) - WallBox.Max.Y) > 0.0f)
+	if (((RopeCenter.Y + RopeRadiusForCollision) - WallBox.Max.Y) > 0.0f)
 	{
 		const FVector& Normal = FVector(0.0f, -1.0f, 0.0f);
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
