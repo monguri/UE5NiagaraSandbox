@@ -113,6 +113,7 @@ private:
 	void UpdateRopeBlockers();
 	void Integrate(int32 ParticleIdx, float SubStepDeltaSeconds);
 	void SolvePositionConstraint(int32 InFrameExeCount);
+	void SolveStaticFriction(float SubStepDeltaSeconds, int32 SubStepCount);
 	void SolveVelocity(float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
 	void ApplyDistanceConstraint(int32 ParticleIdx);
 	void ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount);
@@ -123,6 +124,7 @@ private:
 private:
 	TArray<FVector> Positions;
 	TArray<FVector> PrevPositions;
+	TArray<FVector> PrevConstraintSolvePositions;
 	TArray<FVector> PrevCurrentIterationPositions;
 	TArray<FVector> Velocities;
 	TArray<FVector> PrevConstraintSolveVelocities;
