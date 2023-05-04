@@ -519,6 +519,11 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 		for (int32 i = 0; i < AggGeom.ConvexElems.Num(); ++i)
 		{
 			const FKConvexElem& ConvexElem = AggGeom.ConvexElems[i];
+			if (!ConvexElem.GetChaosConvexMesh())
+			{
+				continue;
+			}
+
 			const FKConvexElem& PrevConvexElem = PrevAggGeom.ConvexElems[i];
 
 			FTransform ConvexTM = PrevConvexElem.GetTransform();
@@ -531,16 +536,13 @@ void ARopeSimulatorCPU::ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, 
 			SetupNonUniformHelper(ConvexTM.GetScale3D(), MinScale, MinScaleAbs, Scale3DAbs);
 
 			const FVector& LocalPosition = ConvexTM.InverseTransformPositionNoScale(RopeCenter);
-			if (ConvexElem.GetChaosConvexMesh())
+			Chaos::FVec3 OutNormal;
+			Chaos::FReal Phi = ConvexElem.GetChaosConvexMesh()->PhiWithNormalScaled(LocalPosition, Scale3DAbs, OutNormal);
+			float Distance = Phi;
+			if (Distance < RopeRadius)
 			{
-				Chaos::FVec3 OutNormal;
-				Chaos::FReal Phi = ConvexElem.GetChaosConvexMesh()->PhiWithNormalScaled(LocalPosition, Scale3DAbs, OutNormal);
 				const FVector& Normal = ConvexTM.TransformVectorNoScale(OutNormal);
-				float Distance = Phi;
-				if (Distance < RopeRadius)
-				{
-					Positions[ParticleIdx] += Normal * (RopeRadius - Distance) * CollisionProjectionAlpha;
-				}
+				Positions[ParticleIdx] += Normal * (RopeRadius - Distance) * CollisionProjectionAlpha;
 			}
 		}
 	}
@@ -640,11 +642,11 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 		const FKAggregateGeom* PrevAggGeomPair = PrevRopeBlockerAggGeomMap.Find(Pair.Key);
 		const FKAggregateGeom& PrevAggGeom = PrevAggGeomPair == nullptr ? AggGeom : *PrevAggGeomPair;
 
-		for (int32 j = 0; j <AggGeom.SphereElems.Num(); ++j)
+		for (int32 i = 0; i <AggGeom.SphereElems.Num(); ++i)
 		{
 			// FKSphereElem::GetClosestPointAndNormalを参考にしている
-			const FKSphereElem& SphereElem = AggGeom.SphereElems[j];
-			const FKSphereElem& PrevSphereElem = PrevAggGeom.SphereElems[j];
+			const FKSphereElem& SphereElem = AggGeom.SphereElems[i];
+			const FKSphereElem& PrevSphereElem = PrevAggGeom.SphereElems[i];
 
 			// イテレーションごとの位置補間は線形補間で行う
 			const FVector& CollisionCenter = FMath::Lerp(PrevSphereElem.Center, SphereElem.Center, SubStepAlpha);
@@ -674,11 +676,11 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 			}
 		}
 
-		for (int32 j = 0; j <AggGeom.BoxElems.Num(); ++j)
+		for (int32 i = 0; i <AggGeom.BoxElems.Num(); ++i)
 		{
 			// FKBoxElem::GetClosestPointAndNormalを参考にしている
-			FKBoxElem BoxElem = AggGeom.BoxElems[j];
-			const FKBoxElem& PrevBoxElem = PrevAggGeom.BoxElems[j];
+			FKBoxElem BoxElem = AggGeom.BoxElems[i];
+			const FKBoxElem& PrevBoxElem = PrevAggGeom.BoxElems[i];
 
 			// 球とBoxの当たり判定だと球がBoxの中に入ったかどうかで分岐して面倒なので、Boxを球の半径だけ大きくして点とBoxの当たり判定にする
 			BoxElem.X += RopeRadius * 2;
@@ -762,11 +764,11 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 			}
 		}
 
-		for (int32 j = 0; j <AggGeom.SphylElems.Num(); ++j)
+		for (int32 i = 0; i <AggGeom.SphylElems.Num(); ++i)
 		{
 			// FKSphylElem::GetClosestPointAndNormalを参考にしている
-			const FKSphylElem& SphylElem = AggGeom.SphylElems[j];
-			const FKSphylElem& PrevSphylElem = PrevAggGeom.SphylElems[j];
+			const FKSphylElem& SphylElem = AggGeom.SphylElems[i];
+			const FKSphylElem& PrevSphylElem = PrevAggGeom.SphylElems[i];
 
 			// イテレーションごとの位置補間は線形補間で行う
 			const FVector& CollisionCenter = FMath::Lerp(PrevSphylElem.Center, SphylElem.Center, SubStepAlpha);
@@ -793,6 +795,61 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 				const FQuat& RotDiff = SphylElem.GetTransform().GetRotation() * PrevSphylElem.GetTransform().GetRotation().Inverse();
 				const FVector& PrevCenterToClosestPos = RotDiff.UnrotateVector(CenterToClosestPos);
 				const FVector& CollisionImpactPointVelocity = ((SphylElem.Center + CenterToClosestPos) - (PrevSphylElem.Center + PrevCenterToClosestPos)) / DeltaSeconds;
+
+				const FVector& PrevSolveRelativeVelocity = PrevSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
+
+				const FVector& ImpactNormal = (RopeCenter - ClosestPoint).GetSafeNormal();
+
+				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
+				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
+				{
+					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
+					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
+					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
+				}
+
+				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
+				{
+					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
+					float ForceNormalLen = FMath::Abs(Accelerations[ParticleIdx] | ImpactNormal);
+					float PrevSolveRelativeVelocityTangentLen = PrevSolveRelativeVelocityTangent.Size();
+					Velocities[ParticleIdx] -= PrevSolveRelativeVelocityTangent / FMath::Max(PrevSolveRelativeVelocityTangentLen, KINDA_SMALL_NUMBER) * FMath::Min(SubStepDeltaSeconds * CollisionDynamicFriction * ForceNormalLen, PrevSolveRelativeVelocityTangentLen);
+				}
+			}
+		}
+
+		for (int32 i = 0; i < AggGeom.ConvexElems.Num(); ++i)
+		{
+			const FKConvexElem& ConvexElem = AggGeom.ConvexElems[i];
+			if (!ConvexElem.GetChaosConvexMesh())
+			{
+				continue;
+			}
+
+			const FKConvexElem& PrevConvexElem = PrevAggGeom.ConvexElems[i];
+
+
+			FTransform ConvexTM = PrevConvexElem.GetTransform();
+			// イテレーションごとの位置補間は線形補間で行う
+			ConvexTM.BlendWith(ConvexElem.GetTransform(), SubStepAlpha);
+
+			// FKConvexElem::GetClosestPointAndNormal()を参考にする
+			float MinScale, MinScaleAbs;
+			FVector Scale3DAbs;
+			SetupNonUniformHelper(ConvexTM.GetScale3D(), MinScale, MinScaleAbs, Scale3DAbs);
+
+			const FVector& LocalPosition = ConvexTM.InverseTransformPositionNoScale(RopeCenter);
+			Chaos::FVec3 OutNormal;
+			Chaos::FReal Phi = ConvexElem.GetChaosConvexMesh()->PhiWithNormalScaled(LocalPosition, Scale3DAbs, OutNormal);
+			float Distance = Phi;
+			if (Distance < RopeRadius)
+			{
+				const FVector& Normal = ConvexTM.TransformVectorNoScale(OutNormal);
+				const FVector& ClosestPoint = RopeCenter - Normal * Distance;
+				const FVector& CenterToClosestPos = ClosestPoint - ConvexTM.GetLocation();
+				const FQuat& RotDiff = ConvexElem.GetTransform().GetRotation() * PrevConvexElem.GetTransform().GetRotation().Inverse();
+				const FVector& PrevCenterToClosestPos = RotDiff.UnrotateVector(CenterToClosestPos);
+				const FVector& CollisionImpactPointVelocity = ((ConvexElem.GetTransform().GetLocation() + CenterToClosestPos) - (PrevConvexElem.GetTransform().GetLocation() + PrevCenterToClosestPos)) / DeltaSeconds;
 
 				const FVector& PrevSolveRelativeVelocity = PrevSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
 
