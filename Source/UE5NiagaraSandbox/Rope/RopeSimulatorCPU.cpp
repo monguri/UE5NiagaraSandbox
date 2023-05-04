@@ -799,7 +799,6 @@ namespace
 void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds)
 {
 	const FVector& RopeCenter = Positions[ParticleIdx];
-	const FVector& PrevConstraintSolveVelocity = PrevConstraintSolveVelocities[ParticleIdx];
 	const FVector& Velocity = Velocities[ParticleIdx];
 	const FVector& Acceleration = Accelerations[ParticleIdx];
 
