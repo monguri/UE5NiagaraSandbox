@@ -327,7 +327,7 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 		PrevSolveVelocities[ParticleIdx] = Velocities[ParticleIdx]; // 位置コンストレイントと静止摩擦を反映した速度
 	}
 
-	if (CollisionRestitution > KINDA_SMALL_NUMBER || CollisionDynamicFriction > KINDA_SMALL_NUMBER || WallRestitution > KINDA_SMALL_NUMBER || WallDynamicFriction > KINDA_SMALL_NUMBER)
+	if (CollisionDynamicFriction > KINDA_SMALL_NUMBER || WallDynamicFriction > KINDA_SMALL_NUMBER)
 	{
 		ParallelFor(NumThreads,
 			[DeltaSeconds, SubStepDeltaSeconds, SubStepCount, this](int32 ThreadIndex)
@@ -346,12 +346,12 @@ void ARopeSimulatorCPU::SolveVelocity(float DeltaSeconds, float SubStepDeltaSeco
 						continue;
 					}
 
-					if (CollisionRestitution > KINDA_SMALL_NUMBER || CollisionDynamicFriction > KINDA_SMALL_NUMBER)
+					if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 					{
 						ApplyRopeBlockersVelocityConstraint(ParticleIdx, DeltaSeconds, SubStepDeltaSeconds, SubStepCount);
 					}
 
-					if (WallRestitution > KINDA_SMALL_NUMBER || WallDynamicFriction > KINDA_SMALL_NUMBER)
+					if (WallDynamicFriction > KINDA_SMALL_NUMBER)
 					{
 						ApplyWallVelocityConstraint(ParticleIdx, SubStepDeltaSeconds);
 					}
@@ -590,23 +590,6 @@ void ARopeSimulatorCPU::ApplyWallCollisionConstraint(int32 ParticleIdx)
 
 namespace
 {
-	void SolveRestituionDeltaVelocity(const FVector& RopeCenter, const FVector& DeepestPenetratePoint, const FVector& ImpactNormal, float Restitution, float RestitutionSleepVelocity, const FVector& Velocity, const FVector& ImpactPointVelocity, const FVector& PrevConstraintSolveVelocity, FVector& InOutDeltaVelocity)
-	{
-		const FVector& RopeCenterToDeepestPenetratePoint = DeepestPenetratePoint - RopeCenter;
-
-		// 外積オペレータ^は演算順序が+より優先ではないのに注意
-		const FVector& DeepestPenetratePointRelativeVelocity = Velocity - ImpactPointVelocity;
-		float RelativeVelocityNormal = DeepestPenetratePointRelativeVelocity | ImpactNormal;
-		if (FMath::Abs(RelativeVelocityNormal) > RestitutionSleepVelocity)
-		{
-			const FVector& DeepestPenetratePointPrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocity - ImpactPointVelocity;
-			float PrevConstraintSolveRelativeVelocityNormal = DeepestPenetratePointPrevConstraintSolveRelativeVelocity | ImpactNormal;
-			const FVector& DeltaVelocity = ImpactNormal * (-RelativeVelocityNormal + FMath::Max(-Restitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
-
-			InOutDeltaVelocity += DeltaVelocity;
-		}
-	}
-
 	void SolveDynamicFrictionDeltaVelocity(const FVector& RopeCenter, const FVector& DeepestPenetratePoint, const FVector& ImpactNormal, float WallDynamicFriction, const FVector& Velocity, const FVector& ImpactPointVelocity, const FVector& Acceleration, float SubStepDeltaSeconds, FVector& InOutDeltaVelocity)
 	{
 		const FVector& RopeCenterToDeepestPenetratePoint = DeepestPenetratePoint - RopeCenter;
@@ -626,7 +609,6 @@ namespace
 
 void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount)
 {
-	float RestitutionSleepVelocity = 2.0f * FMath::Abs(Gravity) * SubStepDeltaSeconds;
 	float SubStepAlpha = (SubStepCount + 1) / NumSubStep;
 
 	const FVector& RopeCenter = Positions[ParticleIdx];
@@ -659,13 +641,6 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 				const FVector& ImpactNormal = (RopeCenter - CollisionCenter).GetSafeNormal();
 
 				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
-				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
-				{
-					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionVelocity;
-					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
-					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
-				}
-
 				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 				{
 					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
@@ -747,13 +722,6 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 				ImpactNormal = BoxTM.TransformVectorNoScale(ImpactNormal);
 
 				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
-				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
-				{
-					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
-					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
-					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
-				}
-
 				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 				{
 					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
@@ -801,13 +769,6 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 				const FVector& ImpactNormal = (RopeCenter - ClosestPoint).GetSafeNormal();
 
 				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
-				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
-				{
-					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
-					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
-					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
-				}
-
 				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 				{
 					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
@@ -856,13 +817,6 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 				const FVector& ImpactNormal = (RopeCenter - ClosestPoint).GetSafeNormal();
 
 				float PrevSolveRelativeVelocityNormal = PrevSolveRelativeVelocity | ImpactNormal;
-				if (CollisionRestitution > KINDA_SMALL_NUMBER && FMath::Abs(PrevSolveRelativeVelocityNormal) > RestitutionSleepVelocity)
-				{
-					const FVector& PrevConstraintSolveRelativeVelocity = PrevConstraintSolveVelocities[ParticleIdx] - CollisionImpactPointVelocity;
-					float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveRelativeVelocity | ImpactNormal;
-					Velocities[ParticleIdx] += ImpactNormal * (-PrevSolveRelativeVelocityNormal + FMath::Max(-CollisionRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
-				}
-
 				if (CollisionDynamicFriction > KINDA_SMALL_NUMBER)
 				{
 					const FVector& PrevSolveRelativeVelocityTangent = PrevSolveRelativeVelocity - PrevSolveRelativeVelocityNormal * ImpactNormal;
@@ -877,20 +831,6 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 
 namespace
 {
-	FVector SolveWallRestituionDeltaVelocity(const FVector& WallNormal, float WallRestitution, float RestitutionSleepVelocity, const FVector& Velocity, const FVector& PrevConstraintSolveVelocity)
-	{
-		FVector DeltaVelocity = FVector::ZeroVector;
-
-		float RelativeVelocityNormal = Velocity | WallNormal;
-		if (FMath::Abs(RelativeVelocityNormal) > RestitutionSleepVelocity)
-		{
-			float PrevConstraintSolveRelativeVelocityNormal = PrevConstraintSolveVelocity | WallNormal;
-			DeltaVelocity = WallNormal * (-RelativeVelocityNormal + FMath::Max(-WallRestitution * PrevConstraintSolveRelativeVelocityNormal, 0.0f));
-		}
-
-		return DeltaVelocity;
-	}
-
 	FVector SolveWallDynamicFrictionDeltaVelocity(const FVector& WallNormal, float WallDynamicFriction, const FVector& Velocity, const FVector& Acceleration, float SubStepDeltaSeconds)
 	{
 		float RelativeVelocityNormal = Velocity | WallNormal;
@@ -908,18 +848,11 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 	const FVector& Velocity = Velocities[ParticleIdx];
 	const FVector& Acceleration = Accelerations[ParticleIdx];
 
-	float RestitutionSleepVelocity = 2.0f * FMath::Abs(Gravity) * SubStepDeltaSeconds;
-
 	// TODO:もともと壁にもぐっている状態で速度が0のものは反発できないからどうすべきかということに解答が出せていない
 	FVector DeltaVelocity = FVector::ZeroVector;
 	if (((RopeCenter.Z + RopeRadius) - WallBox.Max.Z) > 0.0f)
 	{
 		const FVector& Normal = FVector(0.0f, 0.0f, -1.0f);
-		if (WallRestitution > KINDA_SMALL_NUMBER)
-		{
-			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
-		}
-
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
 		{
 			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
@@ -929,11 +862,6 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 	if ((WallBox.Min.Z - (RopeCenter.Z - RopeRadius)) > 0.0f)
 	{
 		const FVector& Normal = FVector(0.0f, 0.0f, 1.0f);
-		if (WallRestitution > KINDA_SMALL_NUMBER)
-		{
-			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
-		}
-
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
 		{
 			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
@@ -943,11 +871,6 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 	if ((WallBox.Min.X - (RopeCenter.X - RopeRadius)) > 0.0f)
 	{
 		const FVector& Normal = FVector(1.0f, 0.0f, 0.0f);
-		if (WallRestitution > KINDA_SMALL_NUMBER)
-		{
-			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
-		}
-
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
 		{
 			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
@@ -957,11 +880,6 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 	if (((RopeCenter.X + RopeRadius) - WallBox.Max.X) > 0.0f)
 	{
 		const FVector& Normal = FVector(-1.0f, 0.0f, 0.0f);
-		if (WallRestitution > KINDA_SMALL_NUMBER)
-		{
-			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
-		}
-
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
 		{
 			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
@@ -971,11 +889,6 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 	if ((WallBox.Min.Y - (RopeCenter.Y - RopeRadius)) > 0.0f)
 	{
 		const FVector& Normal = FVector(0.0f, 1.0f, 0.0f);
-		if (WallRestitution > KINDA_SMALL_NUMBER)
-		{
-			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
-		}
-
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
 		{
 			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);
@@ -985,11 +898,6 @@ void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float Sub
 	if (((RopeCenter.Y + RopeRadius) - WallBox.Max.Y) > 0.0f)
 	{
 		const FVector& Normal = FVector(0.0f, -1.0f, 0.0f);
-		if (WallRestitution > KINDA_SMALL_NUMBER)
-		{
-			DeltaVelocity += SolveWallRestituionDeltaVelocity(Normal, WallRestitution, RestitutionSleepVelocity, Velocity, PrevConstraintSolveVelocity);
-		}
-
 		if (WallDynamicFriction > KINDA_SMALL_NUMBER)
 		{
 			DeltaVelocity += SolveWallDynamicFrictionDeltaVelocity(Normal, WallDynamicFriction, Velocity, Acceleration, SubStepDeltaSeconds);

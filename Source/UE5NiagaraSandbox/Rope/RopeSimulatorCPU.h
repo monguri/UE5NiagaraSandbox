@@ -87,13 +87,7 @@ private:
 	float WallProjectionAlpha = 0.8f;
 
 	UPROPERTY(EditAnywhere)
-	float CollisionRestitution = 0.0f;
-
-	UPROPERTY(EditAnywhere)
 	float CollisionDynamicFriction = 0.0f;
-
-	UPROPERTY(EditAnywhere)
-	float WallRestitution = 0.0f;
 
 	UPROPERTY(EditAnywhere)
 	float WallDynamicFriction = 0.0f;
