@@ -135,7 +135,6 @@ private:
 	// 加速度と慣性モーメントは毎フレーム計算するのでフレーム間のひきつぎはないのだが、使用メモリやTArrayの生成負荷をおさえるために
 	// 使いまわしている
 	TArray<FVector> Accelerations;
-	TArray<FMatrix> InertiaInvs;
 	int32 NumThreadParticles = 0;
 	FTransform InvActorTransform = FTransform::Identity;
 
