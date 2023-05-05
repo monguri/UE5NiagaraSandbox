@@ -54,7 +54,7 @@ private:
 	float RopeRadius = 1.0f;
 
 	UPROPERTY(EditAnywhere)
-	FBox OverlapQueryBox = FBox(FVector(-150.0f, -150.0f, -150.0f), FVector(150.0f, 150.0f, 150.0f));
+	FBox OverlapQueryBox = FBox(FVector(-500.0f, -500.0f, -200.0f), FVector(500.0f, 500.0f, 200.0f));
 
 	UPROPERTY(EditAnywhere)
 	TArray<TEnumAsByte<EObjectTypeQuery>> OverlapQueryObjectTypes;
