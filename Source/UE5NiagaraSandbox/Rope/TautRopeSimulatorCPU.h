@@ -51,55 +51,25 @@ private:
 
 private:
 	UPROPERTY(EditAnywhere)
-	float MeshScale = 1.0f;
-
-	UPROPERTY(EditAnywhere)
 	float RopeRadius = 1.0f;
 
 	UPROPERTY(EditAnywhere)
-	float RopeRadiusForCollision = 1.1f;
-
-	UPROPERTY(EditAnywhere)
-	float RestLength = 2.7f;
-
-	UPROPERTY(EditAnywhere)
-	float Gravity = -981.0f;
-
-	UPROPERTY(EditAnywhere)
-	int32 NumThreads = 4;
-
-	UPROPERTY(EditAnywhere)
-	int32 NumParticles = 32;
-
-	UPROPERTY(EditAnywhere)
-	int32 NumSubStep = 1;
-
-	UPROPERTY(EditAnywhere)
-	int32 NumIteration = 4;
-
-	UPROPERTY(EditAnywhere)
-	float FrameRate = 60.0f;
-
-	UPROPERTY(EditAnywhere)
-	FBox WallBox = FBox(FVector(-150.0f, -150.0f, -150.0f), FVector(150.0f, 150.0f, 150.0f));
-
-	UPROPERTY(EditAnywhere)
-	float CollisionDynamicFriction = 0.0f;
-
-	UPROPERTY(EditAnywhere)
-	float WallDynamicFriction = 0.0f;
+	FBox OverlapQueryBox = FBox(FVector(-150.0f, -150.0f, -150.0f), FVector(150.0f, 150.0f, 150.0f));
 
 	UPROPERTY(EditAnywhere)
 	TArray<TEnumAsByte<EObjectTypeQuery>> OverlapQueryObjectTypes;
+
+	UPROPERTY(EditAnywhere)
+	AActor* StartConstraintActor = nullptr;
+
+	UPROPERTY(EditAnywhere)
+	float StartConstraintRadius = 25.0f;
 
 	UPROPERTY(EditAnywhere)
 	AActor* EndConstraintActor = nullptr;
 
 	UPROPERTY(EditAnywhere)
 	float EndConstraintRadius = 25.0f;
-
-	UPROPERTY(EditAnywhere)
-	float ImpulseVelocityPerOver = 1.0f;
 
 private:
 	struct FCollisionCandidate
@@ -111,32 +81,13 @@ private:
 	};
 
 	void UpdateRopeBlockers();
-	void Integrate(int32 ParticleIdx, float SubStepDeltaSeconds);
-	void SolvePositionConstraint(int32 InFrameExeCount);
-	void SolveStaticFriction(float SubStepDeltaSeconds, int32 SubStepCount);
-	void SolveVelocity(float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
-	void ApplyDistanceConstraint(int32 ParticleIdx);
-	void ApplyRopeBlockersCollisionConstraint(int32 ParticleIdx, int32 InFrameExeCount);
-	void ApplyWallCollisionConstraint(int32 ParticleIdx);
-	void ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, float DeltaSeconds, float SubStepDeltaSeconds, int32 SubStepCount);
-	void ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds);
+	void SolveRopeBlockersCollisionConstraint();
 
 private:
+	int32 NumParticles = 2;
 	TArray<FVector> Positions;
 	TArray<FVector> PrevPositions;
-	TArray<FVector> PrevConstraintSolvePositions;
-	TArray<FVector> PrevCurrentIterationPositions;
-	TArray<FVector> Velocities;
-	TArray<FVector> PrevConstraintSolveVelocities;
-	TArray<FVector> PrevSolveVelocities;
-	TArray<FQuat> InitialOrientations;
-	TArray<FQuat> Orientations;
 	TArray<FLinearColor> Colors;
-	// 加速度と慣性モーメントは毎フレーム計算するのでフレーム間のひきつぎはないのだが、使用メモリやTArrayの生成負荷をおさえるために
-	// 使いまわしている
-	TArray<FVector> Accelerations;
-	TArray<FMatrix> InertiaInvs;
-	int32 NumThreadParticles = 0;
 	FTransform InvActorTransform = FTransform::Identity;
 
 	UPROPERTY(Transient)
