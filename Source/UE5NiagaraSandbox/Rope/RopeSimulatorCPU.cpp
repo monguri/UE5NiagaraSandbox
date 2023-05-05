@@ -802,7 +802,7 @@ void ARopeSimulatorCPU::ApplyRopeBlockersVelocityConstraint(int32 ParticleIdx, f
 	}
 }
 
-namespace
+namespace NiagaraSandbox::RopeSimulator
 {
 	FVector SolveWallDynamicFrictionDeltaVelocity(const FVector& WallNormal, float WallDynamicFriction, const FVector& Velocity, const FVector& Acceleration, float SubStepDeltaSeconds)
 	{
@@ -816,6 +816,8 @@ namespace
 
 void ARopeSimulatorCPU::ApplyWallVelocityConstraint(int32 ParticleIdx, float SubStepDeltaSeconds)
 {
+	using namespace NiagaraSandbox::RopeSimulator;
+
 	const FVector& RopeCenter = Positions[ParticleIdx];
 	const FVector& Velocity = Velocities[ParticleIdx];
 	const FVector& Acceleration = Accelerations[ParticleIdx];
