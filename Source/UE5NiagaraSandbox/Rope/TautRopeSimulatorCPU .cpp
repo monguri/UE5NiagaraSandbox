@@ -8,8 +8,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraDataInterfaceArrayFunctionLibrary.h"
 #include "Async/ParallelFor.h"
-#include "Chaos/Convex.h"
-#include "PhysicsInterfaceTypesCore.h"
+#include "Chaos/TriangleMeshImplicitObject.h"
 
 void ATautRopeSimulatorCPU::PreInitializeComponents()
 {
@@ -140,8 +139,8 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 	// コリジョンがPrimitiveComponent単位で増減することを想定し、呼ばれるたびにマップを作り直す
 	//TODO: PrimitiveComponent内のコリジョンシェイプの増減は想定してない
-	PrevRopeBlockerAggGeomMap = RopeBlockerAggGeomMap;
-	RopeBlockerAggGeomMap.Reset();
+	PrevRopeBlockerPoseMap = RopeBlockerPoseMap;
+	RopeBlockerPoseMap.Reset();
 
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
@@ -153,51 +152,10 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 		// ローカル座標に変換
 		const FTransform& ActorTM = Primitive->GetComponentTransform() * InvActorTransform;
+		RopeBlockerPoseMap.Add(Primitive, ActorTM);
 
-		const FKAggregateGeom& OriginalAggGeom = Primitive->GetBodyInstance()->GetBodySetup()->AggGeom;
-		// マップにはFKAggregateGeomのコピーを保存
-		RopeBlockerAggGeomMap.Add(Primitive, OriginalAggGeom);
-
-		// FKAggregateGeomのコピーコンストラクトを少なくしたいのでマップにAddしてから編集する
-		// TODO:コピーは結構重いだろう。FKConvexElemがあるので
-		FKAggregateGeom* CacheAggGeom = RopeBlockerAggGeomMap.Find(Primitive);
-
-		// キャッシュするFKAggregateGeomにはActorのTransformを先に適用しておく。
-		// PrevRopeBlockerAggGeomMapの状態と各コンストレイントで比較する必要があるため。
-		for (int32 i = 0; i < OriginalAggGeom.SphereElems.Num(); ++i)
+		for (const TSharedPtr<Chaos::FTriangleMeshImplicitObject, ESPMode::ThreadSafe>& TriMesh : Primitive->GetBodyInstance()->GetBodySetup()->ChaosTriMeshes)
 		{
-			CacheAggGeom->SphereElems[i] = OriginalAggGeom.SphereElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
-		}
-
-		for (int32 i = 0; i < OriginalAggGeom.BoxElems.Num(); ++i)
-		{
-			CacheAggGeom->BoxElems[i] = OriginalAggGeom.BoxElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
-		}
-
-		for (int32 i = 0; i < OriginalAggGeom.SphylElems.Num(); ++i)
-		{
-			CacheAggGeom->SphylElems[i] = OriginalAggGeom.SphylElems[i].GetFinalScaled(FVector::OneVector, ActorTM);
-		}
-
-		// FKConvexElemはTransformを保持する形なので直接保存しておく
-		for (int32 i = 0; i < OriginalAggGeom.ConvexElems.Num(); ++i)
-		{
-			CacheAggGeom->ConvexElems[i].SetTransform(ActorTM);
-			// FKConvexElem::SetChaosConvexMesh()は所有権の移動になるので、一から作り直すしかない
-			// UOceanCollisionComponent::UpdateBodySetup()、UOceanCollisionComponent::UpdateBodySetup()が似たようなことをやっている
-			int32 NumHullVerts = CacheAggGeom->ConvexElems[i].VertexData.Num();
-			TArray<Chaos::FConvex::FVec3Type> ConvexVertices;
-			ConvexVertices.SetNum(NumHullVerts);
-			// TODO:これ、TArray同士のコピーなんで=でダメ？
-			for (int32 VertIndex = 0; VertIndex < NumHullVerts; ++VertIndex)
-			{
-				ConvexVertices[VertIndex] = CacheAggGeom->ConvexElems[i].VertexData[VertIndex];
-			}
-
-			TSharedPtr<Chaos::FConvex, ESPMode::ThreadSafe> ChaosConvex = MakeShared<Chaos::FConvex, ESPMode::ThreadSafe>(ConvexVertices, 0.0f);
-
-			//TODO:重い。Chaos::FConvexBuilder::BuildIndices()を走らせている
-			CacheAggGeom->ConvexElems[i].SetChaosConvexMesh(MoveTemp(ChaosConvex));
 		}
 	}
 }

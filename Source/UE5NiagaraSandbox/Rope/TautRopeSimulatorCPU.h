@@ -94,9 +94,9 @@ private:
 	FTransform InvActorTransform = FTransform::Identity;
 
 	UPROPERTY(Transient)
-	TMap<TWeakObjectPtr<const class UPrimitiveComponent>, FKAggregateGeom> PrevRopeBlockerAggGeomMap;
+	TMap<TWeakObjectPtr<const class UPrimitiveComponent>, FTransform> PrevRopeBlockerPoseMap;
 	UPROPERTY(Transient)
-	TMap<TWeakObjectPtr<const class UPrimitiveComponent>, FKAggregateGeom> RopeBlockerAggGeomMap;
+	TMap<TWeakObjectPtr<const class UPrimitiveComponent>, FTransform> RopeBlockerPoseMap;
 
 public:
 	/** Returns NiagaraComponent subobject **/
