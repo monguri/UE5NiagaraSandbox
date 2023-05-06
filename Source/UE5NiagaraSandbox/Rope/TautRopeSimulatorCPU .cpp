@@ -30,7 +30,7 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ParticleIdx++)
 	{
-		PrevPositions[ParticleIdx] = PrevPositions[ParticleIdx] = Positions[ParticleIdx] = FVector::XAxisVector * 100.0f; // 1mの長さの線分
+		PrevPositions[ParticleIdx] = PrevPositions[ParticleIdx] = Positions[ParticleIdx] = FVector::XAxisVector * 100.0f * ParticleIdx; // 1mの長さの線分
 #if 0
 		if (ParticleIdx % 2 == 0)
 		{
