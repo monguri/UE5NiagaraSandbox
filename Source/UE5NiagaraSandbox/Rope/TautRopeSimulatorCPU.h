@@ -98,6 +98,9 @@ private:
 	UPROPERTY(Transient)
 	TMap<TWeakObjectPtr<const class UPrimitiveComponent>, FTransform> RopeBlockerPoseMap;
 
+	//TODO: UPROPERTYをつけるとUHTが通らないのであきらめる
+	TMap<TWeakObjectPtr<const class UPrimitiveComponent>, TArray<TPair<FVector, FVector>>> RopeBlockerTriMeshEdgeArrayMap;
+
 public:
 	/** Returns NiagaraComponent subobject **/
 	class UNiagaraComponent* GetNiagaraComponent() const { return NiagaraComponent; }

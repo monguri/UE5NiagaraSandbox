@@ -142,6 +142,8 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 	PrevRopeBlockerPoseMap = RopeBlockerPoseMap;
 	RopeBlockerPoseMap.Reset();
 
+	RopeBlockerTriMeshEdgeArrayMap.Reset();
+
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
 		const UPrimitiveComponent* Primitive = Overlap.GetComponent();
@@ -154,9 +156,42 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 		const FTransform& ActorTM = Primitive->GetComponentTransform() * InvActorTransform;
 		RopeBlockerPoseMap.Add(Primitive, ActorTM);
 
+		//TODO:毎フレームエッジ配列を作る必要はまずない
+		TArray<TPair<FVector, FVector>> EdgeArray;
+
 		for (const TSharedPtr<Chaos::FTriangleMeshImplicitObject, ESPMode::ThreadSafe>& TriMesh : Primitive->GetBodyInstance()->GetBodySetup()->ChaosTriMeshes)
 		{
+			//TODO: 名前空間関数で作りたいが、LargeIdxTypeとSmallIdxTypeの両方で共通の関数を作るのが難しい
+			auto CollectEdges = [&](const auto& Triangles)
+			{
+				int32 NumTris = Triangles.Num();
+				const Chaos::FTriangleMeshImplicitObject::ParticlesType& Vertices = TriMesh->Particles();
+		
+				for (int32 TriIdx = 0; TriIdx < NumTris; TriIdx++)
+				{
+					for (int32 VertIdx = 0; VertIdx < 3; VertIdx++)
+					{
+						TPair<FVector, FVector> Edge(
+							ActorTM.TransformPosition(FVector(Vertices.X(Triangles[TriIdx][VertIdx % 3]))),
+							ActorTM.TransformPosition(FVector(Vertices.X(Triangles[TriIdx][(VertIdx + 1) % 3])))
+						);
+						EdgeArray.Add(Edge);
+					}
+				}
+			};
+
+			const Chaos::FTrimeshIndexBuffer& IdxBuffer = TriMesh->Elements();
+			if (IdxBuffer.RequiresLargeIndices())
+			{
+				CollectEdges(IdxBuffer.GetLargeIndexBuffer());
+			}
+			else
+			{
+				CollectEdges(IdxBuffer.GetSmallIndexBuffer());
+			}
 		}
+
+		RopeBlockerTriMeshEdgeArrayMap.Add(Primitive, EdgeArray);
 	}
 }
 
