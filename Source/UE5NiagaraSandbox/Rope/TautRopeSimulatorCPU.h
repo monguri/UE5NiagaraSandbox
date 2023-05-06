@@ -85,9 +85,11 @@ private:
 
 private:
 	int32 NumParticles = 2;
+	int32 NumSegments = 1;
 	TArray<FVector> Positions;
-	TArray<FVector> ChildPositions;
 	TArray<FVector> PrevPositions;
+	TArray<FVector> ParentPositions;
+	TArray<FVector> ChildPositions;
 	TArray<FLinearColor> Colors;
 	FTransform InvActorTransform = FTransform::Identity;
 
