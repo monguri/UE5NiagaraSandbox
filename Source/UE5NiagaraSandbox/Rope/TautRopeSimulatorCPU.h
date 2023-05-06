@@ -86,6 +86,7 @@ private:
 private:
 	int32 NumParticles = 2;
 	TArray<FVector> Positions;
+	TArray<FVector> ChildPositions;
 	TArray<FVector> PrevPositions;
 	TArray<FLinearColor> Colors;
 	FTransform InvActorTransform = FTransform::Identity;

@@ -22,12 +22,13 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 	NumParticles = 2;
 
 	Positions.SetNum(NumParticles);
+	ChildPositions.SetNum(NumParticles - 1);
 	PrevPositions.SetNum(NumParticles);
 	Colors.SetNum(NumParticles);
 
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ParticleIdx++)
 	{
-		PrevPositions[ParticleIdx] = Positions[ParticleIdx] = FVector::XAxisVector * 100.0f; // 1mの長さの線分
+		PrevPositions[ParticleIdx] = PrevPositions[ParticleIdx] = Positions[ParticleIdx] = FVector::XAxisVector * 100.0f; // 1mの長さの線分
 		Colors[ParticleIdx] = FLinearColor::MakeRandomColor();
 #if 0
 		if (ParticleIdx % 2 == 0)
@@ -41,11 +42,20 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 #endif
 	}
 
+	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles - 1; ParticleIdx++)
+	{
+		ChildPositions[ParticleIdx] = Positions[ParticleIdx + 1];
+	}
+
 	// Tick()で設定しても、レベルにNiagaraSystemが最初から配置されていると、初回のスポーンでは配列は初期値を使ってしまい
 	//間に合わないのでBeginPlay()でも設定する
-	NiagaraComponent->SetNiagaraVariableInt("NumParticles", NumParticles);
+
+	// パーティクル数でなくセグメント数をNumParticlesには設定する
+	NiagaraComponent->SetNiagaraVariableInt("NumParticles", NumParticles - 1);
+
 	NiagaraComponent->SetNiagaraVariableFloat("RopeRadius", RopeRadius);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
+	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ChildPositions"), ChildPositions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayColor(NiagaraComponent, FName("Colors"), Colors);
 }
 
@@ -82,6 +92,12 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 	}
 
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
+
+	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles - 1; ParticleIdx++)
+	{
+		ChildPositions[ParticleIdx] = Positions[ParticleIdx + 1];
+	}
+	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ChildPositions"), ChildPositions);
 
 #if 0
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ++ParticleIdx)
