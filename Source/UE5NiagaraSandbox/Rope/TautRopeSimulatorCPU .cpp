@@ -134,9 +134,9 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 		return;
 	}
 
-#if 0
+#if 1
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(UpdateRopeBlockers), false);
-#else
+#else // ComplexコリジョンのTriangleMeshの収集したエッジのデバッグ描画
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(UpdateRopeBlockers), true);
 #endif
 
@@ -202,6 +202,7 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 {
+#if 0 // ComplexコリジョンのTriangleMeshの収集したエッジのデバッグ描画
 #if ENABLE_DRAW_DEBUG
 	if (GetWorld() != nullptr)
 	{
@@ -217,6 +218,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			}
 		}
 	}
+#endif
 #endif
 }
 
