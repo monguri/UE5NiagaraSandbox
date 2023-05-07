@@ -9,6 +9,7 @@
 #include "NiagaraDataInterfaceArrayFunctionLibrary.h"
 #include "Async/ParallelFor.h"
 #include "Chaos/TriangleMeshImplicitObject.h"
+#include "DrawDebugHelpers.h"
 
 void ATautRopeSimulatorCPU::PreInitializeComponents()
 {
@@ -133,7 +134,11 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 		return;
 	}
 
+#if 0
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(UpdateRopeBlockers), false);
+#else
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(UpdateRopeBlockers), true);
+#endif
 
 	GetWorld()->OverlapMultiByObjectType(Overlaps, GetActorLocation() + OverlapQueryBox.GetCenter(), GetActorQuat(), ObjectParams, FCollisionShape::MakeBox(OverlapQueryBox.GetExtent()), Params);
 
@@ -197,6 +202,22 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 {
+#if ENABLE_DRAW_DEBUG
+	if (GetWorld() != nullptr)
+	{
+		for (const TPair<TWeakObjectPtr<const class UPrimitiveComponent>, TArray<TPair<FVector, FVector>>>& Pair : RopeBlockerTriMeshEdgeArrayMap)
+		{
+			const TArray<TPair<FVector, FVector>>& EdgeArray = Pair.Value;
+
+			for (const TPair<FVector, FVector>& Edge : EdgeArray)
+			{
+				const FVector& LineStart = InvActorTransform.InverseTransformPosition(Edge.Key);
+				const FVector& LineEnd = InvActorTransform.InverseTransformPosition(Edge.Value);
+				DrawDebugLine(GetWorld(), LineStart, LineEnd, FLinearColor::Red.ToFColorSRGB());
+			}
+		}
+	}
+#endif
 }
 
 ATautRopeSimulatorCPU::ATautRopeSimulatorCPU()
