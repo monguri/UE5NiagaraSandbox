@@ -26,7 +26,6 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 	PrevPositions.SetNum(NumParticles);
 	ParentPositions.SetNum(NumSegments);
 	ChildPositions.SetNum(NumSegments);
-	Colors.SetNum(NumParticles - 1);
 
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ParticleIdx++)
 	{
@@ -45,7 +44,6 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 
 	for (int32 SegmentIdx = 0; SegmentIdx < NumSegments; SegmentIdx++)
 	{
-		Colors[SegmentIdx] = FLinearColor::MakeRandomColor();
 		ParentPositions[SegmentIdx] = Positions[SegmentIdx];
 		ChildPositions[SegmentIdx] = Positions[SegmentIdx + 1];
 	}
@@ -59,7 +57,6 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 	NiagaraComponent->SetNiagaraVariableFloat("RopeRadius", RopeRadius);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ParentPositions"), ParentPositions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ChildPositions"), ChildPositions);
-	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayColor(NiagaraComponent, FName("Colors"), Colors);
 }
 
 void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
@@ -76,29 +73,30 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 			PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 		}
 
-		if (StartConstraintActor != nullptr)
-		{
-			// StartConstraintActorが設定されていればルートをコンストレイント
-			// とりあえずGetActorUpVector()にStartConstraintRadiusだけ離れた位置にコンストレイントさせる形にする
-			Positions[0] = InvActorTransform.TransformPosition(StartConstraintActor->GetActorLocation() + StartConstraintActor->GetActorUpVector() * StartConstraintRadius);
-		}
-		if (EndConstraintActor != nullptr)
-		{
-			// EndConstraintActorが設定されていれば末端をコンストレイント
-			// とりあえずGetActorUpVector()にEndConstraintRadiusだけ離れた位置にコンストレイントさせる形にする
-			Positions[Positions.Num() - 1] = InvActorTransform.TransformPosition(EndConstraintActor->GetActorLocation() + EndConstraintActor->GetActorUpVector() * EndConstraintRadius);
-		}
-		//TODO:長さ制限を与えてConstraintActor自体をコンストレイントさせるのは後で行う:w
-
+		UpdateStartEndConstraint();
 		UpdateRopeBlockers();
 		SolveRopeBlockersCollisionConstraint();
 	}
 
+
+	check(NumParticles >= 2);
+	check(NumSegments >= 1);
+#if 1
+	// 直接サイズとインデックス指定でコピーする方法がないので一旦別変数にコピーしてMove。
+	TArray<FVector> TmpParentPositions(Positions.GetData(), NumSegments);
+	TArray<FVector> TmpChildPositions(&Positions.GetData()[1], NumSegments);
+	ParentPositions = MoveTemp(TmpParentPositions);
+	ChildPositions = MoveTemp(TmpChildPositions);
+#else
+	ParentPositions.SetNum(NumSegments);
+	ChildPositions.SetNum(NumSegments);
 	for (int32 SegmentIdx = 0; SegmentIdx < NumSegments; SegmentIdx++)
 	{
 		ParentPositions[SegmentIdx] = Positions[SegmentIdx];
 		ChildPositions[SegmentIdx] = Positions[SegmentIdx + 1];
 	}
+#endif
+	NiagaraComponent->SetNiagaraVariableInt("NumSegments", NumSegments);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ParentPositions"), ParentPositions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ChildPositions"), ChildPositions);
 
@@ -123,6 +121,23 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
 #endif
+}
+
+void ATautRopeSimulatorCPU::UpdateStartEndConstraint()
+{
+	if (StartConstraintActor != nullptr)
+	{
+		// StartConstraintActorが設定されていればルートをコンストレイント
+		// とりあえずGetActorUpVector()にStartConstraintRadiusだけ離れた位置にコンストレイントさせる形にする
+		Positions[0] = InvActorTransform.TransformPosition(StartConstraintActor->GetActorLocation() + StartConstraintActor->GetActorUpVector() * StartConstraintRadius);
+	}
+	if (EndConstraintActor != nullptr)
+	{
+		// EndConstraintActorが設定されていれば末端をコンストレイント
+		// とりあえずGetActorUpVector()にEndConstraintRadiusだけ離れた位置にコンストレイントさせる形にする
+		Positions[Positions.Num() - 1] = InvActorTransform.TransformPosition(EndConstraintActor->GetActorLocation() + EndConstraintActor->GetActorUpVector() * EndConstraintRadius);
+	}
+	//TODO:長さ制限を与えてConstraintActor自体をコンストレイントさせるのは後で行う:w
 }
 
 void ATautRopeSimulatorCPU::UpdateRopeBlockers()
@@ -219,6 +234,79 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		}
 	}
 #endif
+
+	// 発見した衝突点
+	TMap<int32, FVector> FoundIntersectionPoints;
+
+	for (int32 SegmentIdx = 0; SegmentIdx < NumSegments; SegmentIdx++)
+	{
+		// TODO:本当はTriangleでなく扇形で見るべきなんだよな。Triangleだと接触判定で漏らす可能性がある
+		// 1フレームだと大きく動かず、扇形をTriangleで近似できる前提のコード
+		// TODO:Triangleに面積がなかったら処理はカリングした方がよい
+		const FVector& Tri0Vert0 = PrevPositions[SegmentIdx];
+		const FVector& Tri0Vert1 = Positions[SegmentIdx];
+		const FVector& Tri0Vert2 = PrevPositions[SegmentIdx + 1];
+
+		const FVector& Tri1Vert0 = PrevPositions[SegmentIdx];
+		const FVector& Tri1Vert1 = Positions[SegmentIdx + 1];
+		const FVector& Tri1Vert2 = PrevPositions[SegmentIdx + 1];
+
+		for (const TPair<TWeakObjectPtr<const class UPrimitiveComponent>, TArray<TPair<FVector, FVector>>>& Pair : RopeBlockerTriMeshEdgeArrayMap)
+		{
+			const TArray<TPair<FVector, FVector>>& EdgeArray = Pair.Value;
+
+			for (const TPair<FVector, FVector>& Edge : EdgeArray)
+			{
+				const FVector& RayStart = Edge.Key;
+				const FVector& RayEnd = Edge.Value;
+				FVector RayDir;
+				double RayLength;
+				(RayEnd - RayStart).ToDirectionAndLength(RayDir, RayLength);
+
+				double Time;
+				FVector Normal;
+				bool bIntersecting = RayTriangleIntersection(RayStart, RayDir, RayLength, Tri0Vert0, Tri0Vert1, Tri0Vert2, Time, Normal);
+				if (bIntersecting)
+				{
+					const FVector& IntersectPoint = FMath::Lerp(RayStart, RayEnd, Time);
+					FoundIntersectionPoints.Add(SegmentIndex, IntersectPoint);
+					// 一方のTriangleが接触してたらそれで終了
+					continue;
+				}
+
+				// 一方のTriangleが接触してなければもう一個の方をチェック
+				// TODO:複数エッジがあって一度に複数の接触点が見つかったときにこの方法でうまくいくか？
+				bIntersecting = RayTriangleIntersection(RayStart, RayDir, RayLength, Tri1Vert0, Tri1Vert1, Tri1Vert2, Time, Normal);
+				if (bIntersecting)
+				{
+					const FVector& IntersectPoint = FMath::Lerp(RayStart, RayEnd, Time);
+					FoundIntersectionPoints.Add(SegmentIndex, IntersectPoint);
+					PrevPositions.Insert(IntersectPoint, SegmentIndex);
+					Positions.Insert(IntersectPoint, SegmentIndex);
+					NumParticles++;
+					NumSegments = NumParticles - 1;
+					continue;
+				}
+			}
+		}
+	}
+
+	// 次にPrevPositions[]/Positions[]にインサートしていくときにソートされてなければならない
+	FoundIntersectionPoints.KeySort();
+
+	// TODO:再帰が必要では。ガウスザイデル的反復？
+	int32 InsertedCount = 0;
+	for (const TPair<int32, FVector>& Pair : FoundIntersectionPoints)
+	{
+		int32 SegmentIndex = Pair.Key;
+		const FVector& IntersectPoint = Pair.Value;
+		PrevPositions.Insert(IntersectPoint, SegmentIndex + 1 + InsertedCount);
+		Positions.Insert(IntersectPoint, SegmentIndex + 1 + InsertedCount);
+		InsertedCount++;
+	}
+
+	NumParticles += InsertedCount;
+	NumSegments = NumParticles - 1;
 #endif
 }
 

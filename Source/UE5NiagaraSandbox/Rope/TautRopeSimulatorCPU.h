@@ -80,6 +80,7 @@ private:
 		FCollisionCandidate(int32 _AnotherParticleIdx) : AnotherParticleIdx(_AnotherParticleIdx) {}
 	};
 
+	void UpdateStartEndConstraint();
 	void UpdateRopeBlockers();
 	void SolveRopeBlockersCollisionConstraint();
 
@@ -90,7 +91,6 @@ private:
 	TArray<FVector> PrevPositions;
 	TArray<FVector> ParentPositions;
 	TArray<FVector> ChildPositions;
-	TArray<FLinearColor> Colors;
 	FTransform InvActorTransform = FTransform::Identity;
 
 	UPROPERTY(Transient)
