@@ -78,7 +78,6 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 		SolveRopeBlockersCollisionConstraint();
 	}
 
-
 	check(NumParticles >= 2);
 	check(NumSegments >= 1);
 #if 1
@@ -234,7 +233,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		}
 	}
 #endif
-
+#else
 	// 発見した衝突点
 	TMap<int32, FVector> FoundIntersectionPoints;
 
@@ -259,32 +258,22 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			{
 				const FVector& RayStart = Edge.Key;
 				const FVector& RayEnd = Edge.Value;
-				FVector RayDir;
-				double RayLength;
-				(RayEnd - RayStart).ToDirectionAndLength(RayDir, RayLength);
-
-				double Time;
-				FVector Normal;
-				bool bIntersecting = RayTriangleIntersection(RayStart, RayDir, RayLength, Tri0Vert0, Tri0Vert1, Tri0Vert2, Time, Normal);
+				FVector IntersectPoint;
+				FVector IntersectNormal;
+				bool bIntersecting = FMath::SegmentTriangleIntersection(Edge.Key, Edge.Value, Tri0Vert0, Tri0Vert1, Tri0Vert2, IntersectPoint, IntersectNormal);
 				if (bIntersecting)
 				{
-					const FVector& IntersectPoint = FMath::Lerp(RayStart, RayEnd, Time);
-					FoundIntersectionPoints.Add(SegmentIndex, IntersectPoint);
+					FoundIntersectionPoints.Add(SegmentIdx, IntersectPoint);
 					// 一方のTriangleが接触してたらそれで終了
+					// 一方のTriangleが接触してなければもう一個の方をチェック
 					continue;
 				}
 
-				// 一方のTriangleが接触してなければもう一個の方をチェック
 				// TODO:複数エッジがあって一度に複数の接触点が見つかったときにこの方法でうまくいくか？
-				bIntersecting = RayTriangleIntersection(RayStart, RayDir, RayLength, Tri1Vert0, Tri1Vert1, Tri1Vert2, Time, Normal);
+				bIntersecting = FMath::SegmentTriangleIntersection(Edge.Key, Edge.Value, Tri1Vert0, Tri1Vert1, Tri1Vert2, IntersectPoint, IntersectNormal);
 				if (bIntersecting)
 				{
-					const FVector& IntersectPoint = FMath::Lerp(RayStart, RayEnd, Time);
-					FoundIntersectionPoints.Add(SegmentIndex, IntersectPoint);
-					PrevPositions.Insert(IntersectPoint, SegmentIndex);
-					Positions.Insert(IntersectPoint, SegmentIndex);
-					NumParticles++;
-					NumSegments = NumParticles - 1;
+					FoundIntersectionPoints.Add(SegmentIdx, IntersectPoint);
 					continue;
 				}
 			}
@@ -292,16 +281,16 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 	}
 
 	// 次にPrevPositions[]/Positions[]にインサートしていくときにソートされてなければならない
-	FoundIntersectionPoints.KeySort();
+	FoundIntersectionPoints.KeySort(TLess<int32>());
 
 	// TODO:再帰が必要では。ガウスザイデル的反復？
 	int32 InsertedCount = 0;
 	for (const TPair<int32, FVector>& Pair : FoundIntersectionPoints)
 	{
-		int32 SegmentIndex = Pair.Key;
+		int32 SegmentIdx = Pair.Key;
 		const FVector& IntersectPoint = Pair.Value;
-		PrevPositions.Insert(IntersectPoint, SegmentIndex + 1 + InsertedCount);
-		Positions.Insert(IntersectPoint, SegmentIndex + 1 + InsertedCount);
+		PrevPositions.Insert(IntersectPoint, SegmentIdx + 1 + InsertedCount);
+		Positions.Insert(IntersectPoint, SegmentIdx + 1 + InsertedCount);
 		InsertedCount++;
 	}
 
