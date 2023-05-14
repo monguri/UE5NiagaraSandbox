@@ -158,9 +158,6 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 	// コリジョンがPrimitiveComponent単位で増減することを想定し、呼ばれるたびにマップを作り直す
 	//TODO: PrimitiveComponent内のコリジョンシェイプの増減は想定してない
-	PrevRopeBlockerPoseMap = RopeBlockerPoseMap;
-	RopeBlockerPoseMap.Reset();
-
 	RopeBlockerTriMeshEdgeArrayMap.Reset();
 
 	for (const FOverlapResult& Overlap : Overlaps)
@@ -173,28 +170,60 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 		// ローカル座標に変換
 		const FTransform& ActorTM = Primitive->GetComponentTransform() * InvActorTransform;
-		RopeBlockerPoseMap.Add(Primitive, ActorTM);
 
 		//TODO:毎フレームエッジ配列を作る必要はまずない
 		TArray<TPair<FVector, FVector>> EdgeArray;
 
+		// TODO:ChaosTriMeshesにも複数のFTriangleMeshImplicitObjectがあるのにすべてまとめてEdgeArrayに入れるのは
+		// 無理。
 		for (const TSharedPtr<Chaos::FTriangleMeshImplicitObject, ESPMode::ThreadSafe>& TriMesh : Primitive->GetBodyInstance()->GetBodySetup()->ChaosTriMeshes)
 		{
 			//TODO: 名前空間関数で作りたいが、LargeIdxTypeとSmallIdxTypeの両方で共通の関数を作るのが難しい
 			auto CollectEdges = [&](const auto& Triangles)
 			{
+				// 検索を高速にするためハッシュ構造のあるTSetを使う
+				TSet<TPair<int32, int32>> UniqueEdgeSet;
+
+				// 上限サイズをとっておく
 				int32 NumTris = Triangles.Num();
+				UniqueEdgeSet.Reserve(NumTris * 3);
+				EdgeArray.Reserve(NumTris * 3);
+
 				const Chaos::FTriangleMeshImplicitObject::ParticlesType& Vertices = TriMesh->Particles();
 		
 				for (int32 TriIdx = 0; TriIdx < NumTris; TriIdx++)
 				{
 					for (int32 VertIdx = 0; VertIdx < 3; VertIdx++)
 					{
-						TPair<FVector, FVector> Edge(
-							ActorTM.TransformPosition(FVector(Vertices.X(Triangles[TriIdx][VertIdx % 3]))),
-							ActorTM.TransformPosition(FVector(Vertices.X(Triangles[TriIdx][(VertIdx + 1) % 3])))
-						);
-						EdgeArray.Add(Edge);
+						int32 EdgeIdx0 = Triangles[TriIdx][VertIdx];
+						int32 EdgeIdx1 = Triangles[TriIdx][(VertIdx + 1) % 3];
+						TPair<int32, int32> Edge;
+						if (EdgeIdx0 <= EdgeIdx1)
+						{
+							Edge = TPair<int32, int32>(EdgeIdx0, EdgeIdx1);
+						}
+						else
+						{
+							Edge = TPair<int32, int32>(EdgeIdx1, EdgeIdx0);
+						}
+
+						const TPair<int32, int32>* FoundEdge = UniqueEdgeSet.Find(Edge);
+						if (FoundEdge == nullptr)
+						{
+							UniqueEdgeSet.Add(
+								TPair<int32, int32>(
+									Triangles[TriIdx][VertIdx], 
+									Triangles[TriIdx][(VertIdx + 1) % 3]
+								)
+							);
+
+							EdgeArray.Add(
+								TPair<FVector, FVector>(
+									ActorTM.TransformPosition(FVector(Vertices.X(Triangles[TriIdx][VertIdx % 3]))),
+									ActorTM.TransformPosition(FVector(Vertices.X(Triangles[TriIdx][(VertIdx + 1) % 3])))
+								)
+							);
+						}
 					}
 				}
 			};

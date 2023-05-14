@@ -93,11 +93,6 @@ private:
 	TArray<FVector> ChildPositions;
 	FTransform InvActorTransform = FTransform::Identity;
 
-	UPROPERTY(Transient)
-	TMap<TWeakObjectPtr<const class UPrimitiveComponent>, FTransform> PrevRopeBlockerPoseMap;
-	UPROPERTY(Transient)
-	TMap<TWeakObjectPtr<const class UPrimitiveComponent>, FTransform> RopeBlockerPoseMap;
-
 	//TODO: UPROPERTYをつけるとUHTが通らないのであきらめる
 	TMap<TWeakObjectPtr<const class UPrimitiveComponent>, TArray<TPair<FVector, FVector>>> RopeBlockerTriMeshEdgeArrayMap;
 
