@@ -191,6 +191,7 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 				const Chaos::FTriangleMeshImplicitObject::ParticlesType& Vertices = TriMesh->Particles();
 		
+				// ユニークなエッジ配列を作る処理はFTriangleMesh::GetSegmentMesh()を参考にした
 				for (int32 TriIdx = 0; TriIdx < NumTris; TriIdx++)
 				{
 					for (int32 VertIdx = 0; VertIdx < 3; VertIdx++)
@@ -210,17 +211,12 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 						const TPair<int32, int32>* FoundEdge = UniqueEdgeSet.Find(Edge);
 						if (FoundEdge == nullptr)
 						{
-							UniqueEdgeSet.Add(
-								TPair<int32, int32>(
-									Triangles[TriIdx][VertIdx], 
-									Triangles[TriIdx][(VertIdx + 1) % 3]
-								)
-							);
+							UniqueEdgeSet.Add(Edge);
 
 							EdgeArray.Add(
 								TPair<FVector, FVector>(
-									ActorTM.TransformPosition(FVector(Vertices.X(Triangles[TriIdx][VertIdx % 3]))),
-									ActorTM.TransformPosition(FVector(Vertices.X(Triangles[TriIdx][(VertIdx + 1) % 3])))
+									ActorTM.TransformPosition(FVector(Vertices.X(Edge.Key))),
+									ActorTM.TransformPosition(FVector(Vertices.X(Edge.Value)))
 								)
 							);
 						}
