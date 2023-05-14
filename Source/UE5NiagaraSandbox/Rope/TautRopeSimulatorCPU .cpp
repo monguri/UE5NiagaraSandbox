@@ -158,7 +158,7 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 	// コリジョンがPrimitiveComponent単位で増減することを想定し、呼ばれるたびにマップを作り直す
 	//TODO: PrimitiveComponent内のコリジョンシェイプの増減は想定してない
-	RopeBlockerTriMeshEdgeArrayMap.Reset();
+	RopeBlockerTriMeshEdgeArray.Reset();
 
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
@@ -235,7 +235,7 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 			}
 		}
 
-		RopeBlockerTriMeshEdgeArrayMap.Add(Primitive, EdgeArray);
+		RopeBlockerTriMeshEdgeArray.Append(EdgeArray);
 	}
 }
 
@@ -245,7 +245,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 #if ENABLE_DRAW_DEBUG
 	if (GetWorld() != nullptr)
 	{
-		for (const TPair<TWeakObjectPtr<const class UPrimitiveComponent>, TArray<TPair<FVector, FVector>>>& Pair : RopeBlockerTriMeshEdgeArrayMap)
+		for (const TPair<TWeakObjectPtr<const class UPrimitiveComponent>, TArray<TPair<FVector, FVector>>>& Pair : RopeBlockerTriMeshEdgeArray)
 		{
 			const TArray<TPair<FVector, FVector>>& EdgeArray = Pair.Value;
 
@@ -275,32 +275,27 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		const FVector& Tri1Vert1 = Positions[SegmentIdx + 1];
 		const FVector& Tri1Vert2 = PrevPositions[SegmentIdx + 1];
 
-		for (const TPair<TWeakObjectPtr<const class UPrimitiveComponent>, TArray<TPair<FVector, FVector>>>& Pair : RopeBlockerTriMeshEdgeArrayMap)
+		for (const TPair<FVector, FVector>& Edge : RopeBlockerTriMeshEdgeArray)
 		{
-			const TArray<TPair<FVector, FVector>>& EdgeArray = Pair.Value;
-
-			for (const TPair<FVector, FVector>& Edge : EdgeArray)
+			const FVector& RayStart = Edge.Key;
+			const FVector& RayEnd = Edge.Value;
+			FVector IntersectPoint;
+			FVector IntersectNormal;
+			bool bIntersecting = FMath::SegmentTriangleIntersection(Edge.Key, Edge.Value, Tri0Vert0, Tri0Vert1, Tri0Vert2, IntersectPoint, IntersectNormal);
+			if (bIntersecting)
 			{
-				const FVector& RayStart = Edge.Key;
-				const FVector& RayEnd = Edge.Value;
-				FVector IntersectPoint;
-				FVector IntersectNormal;
-				bool bIntersecting = FMath::SegmentTriangleIntersection(Edge.Key, Edge.Value, Tri0Vert0, Tri0Vert1, Tri0Vert2, IntersectPoint, IntersectNormal);
-				if (bIntersecting)
-				{
-					FoundIntersectionPoints.Add(SegmentIdx, IntersectPoint);
-					// 一方のTriangleが接触してたらそれで終了
-					// 一方のTriangleが接触してなければもう一個の方をチェック
-					continue;
-				}
+				FoundIntersectionPoints.Add(SegmentIdx, IntersectPoint);
+				// 一方のTriangleが接触してたらそれで終了
+				// 一方のTriangleが接触してなければもう一個の方をチェック
+				continue;
+			}
 
-				// TODO:複数エッジがあって一度に複数の接触点が見つかったときにこの方法でうまくいくか？
-				bIntersecting = FMath::SegmentTriangleIntersection(Edge.Key, Edge.Value, Tri1Vert0, Tri1Vert1, Tri1Vert2, IntersectPoint, IntersectNormal);
-				if (bIntersecting)
-				{
-					FoundIntersectionPoints.Add(SegmentIdx, IntersectPoint);
-					continue;
-				}
+			// TODO:複数エッジがあって一度に複数の接触点が見つかったときにこの方法でうまくいくか？
+			bIntersecting = FMath::SegmentTriangleIntersection(Edge.Key, Edge.Value, Tri1Vert0, Tri1Vert1, Tri1Vert2, IntersectPoint, IntersectNormal);
+			if (bIntersecting)
+			{
+				FoundIntersectionPoints.Add(SegmentIdx, IntersectPoint);
+				continue;
 			}
 		}
 	}

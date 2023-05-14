@@ -94,7 +94,7 @@ private:
 	FTransform InvActorTransform = FTransform::Identity;
 
 	//TODO: UPROPERTYをつけるとUHTが通らないのであきらめる
-	TMap<TWeakObjectPtr<const class UPrimitiveComponent>, TArray<TPair<FVector, FVector>>> RopeBlockerTriMeshEdgeArrayMap;
+	TArray<TPair<FVector, FVector>> RopeBlockerTriMeshEdgeArray;
 
 public:
 	/** Returns NiagaraComponent subobject **/
