@@ -17,6 +17,7 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 
 	// 何度も使うのでキャッシュしておく
 	InvActorTransform = GetActorTransform().Inverse();
+	ToleranceSquared = Tolerance * Tolerance; // TODO:リアルタイムには更新しない
 
 	// まずは一つの線分から
 	NumParticles = 2;
@@ -26,10 +27,12 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 	PrevPositions.SetNum(NumParticles);
 	ParentPositions.SetNum(NumSegments);
 	ChildPositions.SetNum(NumSegments);
+	EdgeIdxOfPositions.SetNum(NumParticles);
 
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ParticleIdx++)
 	{
 		PrevPositions[ParticleIdx] = PrevPositions[ParticleIdx] = Positions[ParticleIdx] = FVector::XAxisVector * 100.0f * ParticleIdx; // 1mの長さの線分
+		EdgeIdxOfPositions[ParticleIdx] = INDEX_NONE;
 #if 0
 		if (ParticleIdx % 2 == 0)
 		{
@@ -235,12 +238,32 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 			}
 		}
 
+		//TODO:CollisionStatesで使うために、毎フレーム変化がないこと、要素の順番に変更がないことを前提にしている
 		RopeBlockerTriMeshEdgeArray.Append(EdgeArray);
 	}
 }
 
+namespace NiagaraSandbox::RopeSimulator
+{
+	// TODO:衝突エッジが変わってなくて衝突位置が変化してるケースに未対応
+	enum class ECollisionStateTransition : uint8
+	{
+		None,
+		New,
+		Remove,
+	};
+
+	struct FCollisionStateTransition
+	{
+		ECollisionStateTransition Transition = ECollisionStateTransition::None;
+		int32 EdgeIdx = INDEX_NONE;
+		FVector Point = FVector::ZeroVector;
+	};
+}
+
 void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 {
+	using namespace NiagaraSandbox::RopeSimulator;
 #if 0 // ComplexコリジョンのTriangleMeshの収集したエッジのデバッグ描画
 #if ENABLE_DRAW_DEBUG
 	if (GetWorld() != nullptr)
@@ -259,62 +282,143 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 	}
 #endif
 #else
-	// 発見した衝突点
-	TMap<int32, FVector> FoundIntersectionPoints;
 
+	TArray<FCollisionStateTransition> CollisionStateTransitions;
+	CollisionStateTransitions.SetNum(NumParticles);
+
+	for (FCollisionStateTransition& CollisionState : CollisionStateTransitions)
+	{
+		//TODO:初期化必要？
+		CollisionState.Transition = ECollisionStateTransition::None;
+		CollisionState.EdgeIdx = INDEX_NONE;
+	}
+
+	// TODO:再帰が必要では。ガウスザイデル的反復？
 	for (int32 SegmentIdx = 0; SegmentIdx < NumSegments; SegmentIdx++)
 	{
 		// TODO:本当はTriangleでなく扇形で見るべきなんだよな。Triangleだと接触判定で漏らす可能性がある
 		// 1フレームだと大きく動かず、扇形をTriangleで近似できる前提のコード
-		// TODO:Triangleに面積がなかったら処理はカリングした方がよい
-		const FVector& Tri0Vert0 = PrevPositions[SegmentIdx];
-		const FVector& Tri0Vert1 = Positions[SegmentIdx];
-		const FVector& Tri0Vert2 = PrevPositions[SegmentIdx + 1];
 
-		const FVector& Tri1Vert0 = PrevPositions[SegmentIdx];
-		const FVector& Tri1Vert1 = Positions[SegmentIdx + 1];
-		const FVector& Tri1Vert2 = PrevPositions[SegmentIdx + 1];
-
-		for (const TPair<FVector, FVector>& Edge : RopeBlockerTriMeshEdgeArray)
+		bool bIntersectionStateChanged = false;
+		if ((PrevPositions[SegmentIdx] - Positions[SegmentIdx]).SizeSquared() > ToleranceSquared)
 		{
-			const FVector& RayStart = Edge.Key;
-			const FVector& RayEnd = Edge.Value;
-			FVector IntersectPoint;
-			FVector IntersectNormal;
-			bool bIntersecting = FMath::SegmentTriangleIntersection(Edge.Key, Edge.Value, Tri0Vert0, Tri0Vert1, Tri0Vert2, IntersectPoint, IntersectNormal);
-			if (bIntersecting)
-			{
-				FoundIntersectionPoints.Add(SegmentIdx, IntersectPoint);
-				// 一方のTriangleが接触してたらそれで終了
-				// 一方のTriangleが接触してなければもう一個の方をチェック
-				continue;
-			}
+			const FVector& TriVert0 = PrevPositions[SegmentIdx];
+			const FVector& TriVert1 = Positions[SegmentIdx];
+			const FVector& TriVert2 = PrevPositions[SegmentIdx + 1];
 
-			// TODO:複数エッジがあって一度に複数の接触点が見つかったときにこの方法でうまくいくか？
-			bIntersecting = FMath::SegmentTriangleIntersection(Edge.Key, Edge.Value, Tri1Vert0, Tri1Vert1, Tri1Vert2, IntersectPoint, IntersectNormal);
-			if (bIntersecting)
+			for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 			{
-				FoundIntersectionPoints.Add(SegmentIdx, IntersectPoint);
-				continue;
+				const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+				const FVector& RayStart = Edge.Key;
+				const FVector& RayEnd = Edge.Value;
+				FVector IntersectPoint;
+				FVector IntersectNormal;
+				bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
+				if (bIntersecting)
+				{
+					if (EdgeIdxOfPositions[SegmentIdx + 1] != EdgeIdx)
+					{
+						// 衝突したものが既存の衝突しているエッジと違った場合
+						CollisionStateTransitions[SegmentIdx].Transition = ECollisionStateTransition::New;
+						// 追加するパーティクルのインデックスはCollisionStateTransitionsのインデックス+1にするというルール
+						CollisionStateTransitions[SegmentIdx].EdgeIdx = EdgeIdx;
+						CollisionStateTransitions[SegmentIdx].Point = IntersectPoint;
+						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
+						bIntersectionStateChanged = true;
+						continue;
+					}
+				}
+				else
+				{
+					if (EdgeIdxOfPositions[SegmentIdx + 1] == EdgeIdx)
+					{
+						// 既存の衝突しているエッジが衝突してなかったら衝突点の削除
+						// 削除するパーティクルのインデックスはCollisionStateTransitionsのインデックスにするというルール
+						CollisionStateTransitions[SegmentIdx + 1].Transition = ECollisionStateTransition::Remove;
+						bIntersectionStateChanged = true;
+						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
+						continue;
+					}
+				}
+			}
+		}
+
+		if (!bIntersectionStateChanged // 一方のTriangleで接触変更を検知したらもう一方は判定しない
+			&& (PrevPositions[SegmentIdx + 1] - Positions[SegmentIdx + 1]).SizeSquared() > ToleranceSquared)
+		{
+			const FVector& TriVert0 = PrevPositions[SegmentIdx];
+			const FVector& TriVert1 = Positions[SegmentIdx + 1];
+			const FVector& TriVert2 = PrevPositions[SegmentIdx + 1];
+
+			// TODO: 上のifブロックと処理が冗長
+			for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+			{
+				const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+				const FVector& RayStart = Edge.Key;
+				const FVector& RayEnd = Edge.Value;
+				FVector IntersectPoint;
+				FVector IntersectNormal;
+				bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
+				if (bIntersecting)
+				{
+					if (EdgeIdxOfPositions[SegmentIdx] != EdgeIdx)
+					{
+						// 衝突したものが既存の衝突しているエッジと違った場合
+						CollisionStateTransitions[SegmentIdx].Transition = ECollisionStateTransition::New;
+						// TODO:既にCollisionStateTransitions[SegmentIdx].Transition==ECollisionStateTransition::Removeだったケースに対応してない
+						// 追加するパーティクルのインデックスはCollisionStateTransitionsのインデックス+1にするというルール
+						CollisionStateTransitions[SegmentIdx].EdgeIdx = EdgeIdx;
+						CollisionStateTransitions[SegmentIdx].Point = IntersectPoint;
+						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
+						bIntersectionStateChanged = true;
+						continue;
+					}
+				}
+				else
+				{
+					if (EdgeIdxOfPositions[SegmentIdx] == EdgeIdx)
+					{
+						check(SegmentIdx >= 1);
+						// 既存の衝突しているエッジが衝突してなかったら衝突点の削除
+						// 削除するパーティクルのインデックスはCollisionStateTransitionsのインデックスにするというルール
+						CollisionStateTransitions[SegmentIdx].Transition = ECollisionStateTransition::Remove;
+						bIntersectionStateChanged = true;
+						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
+						continue;
+					}
+				}
 			}
 		}
 	}
 
-	// 次にPrevPositions[]/Positions[]にインサートしていくときにソートされてなければならない
-	FoundIntersectionPoints.KeySort(TLess<int32>());
-
-	// TODO:再帰が必要では。ガウスザイデル的反復？
-	int32 InsertedCount = 0;
-	for (const TPair<int32, FVector>& Pair : FoundIntersectionPoints)
+	int32 IncreasedCount = 0; // 衝突が減ったときは負になる
+	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ParticleIdx++)
 	{
-		int32 SegmentIdx = Pair.Key;
-		const FVector& IntersectPoint = Pair.Value;
-		PrevPositions.Insert(IntersectPoint, SegmentIdx + 1 + InsertedCount);
-		Positions.Insert(IntersectPoint, SegmentIdx + 1 + InsertedCount);
-		InsertedCount++;
+		const FCollisionStateTransition& CollisionStateTransition = CollisionStateTransitions[ParticleIdx];
+		switch (CollisionStateTransition.Transition)
+		{
+			case ECollisionStateTransition::None:
+				// 何もしない
+				break;
+			case ECollisionStateTransition::New:
+				PrevPositions.Insert(CollisionStateTransition.Point, ParticleIdx + 1 + IncreasedCount);
+				Positions.Insert(CollisionStateTransition.Point, ParticleIdx + 1 + IncreasedCount);
+				EdgeIdxOfPositions.Insert(CollisionStateTransition.EdgeIdx, ParticleIdx + 1 + IncreasedCount);
+				IncreasedCount++;
+				break;
+			case ECollisionStateTransition::Remove:
+				PrevPositions.RemoveAt(ParticleIdx + IncreasedCount);
+				Positions.RemoveAt(ParticleIdx + IncreasedCount);
+				EdgeIdxOfPositions.RemoveAt(ParticleIdx + IncreasedCount);
+				IncreasedCount--;
+				break;
+			default:
+				check(false);
+				break;
+		}
 	}
 
-	NumParticles += InsertedCount;
+	NumParticles += IncreasedCount;
 	NumSegments = NumParticles - 1;
 #endif
 }

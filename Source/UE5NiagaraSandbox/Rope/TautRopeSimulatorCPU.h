@@ -51,6 +51,9 @@ private:
 
 private:
 	UPROPERTY(EditAnywhere)
+	float Tolerance = 0.1f;
+
+	UPROPERTY(EditAnywhere)
 	float RopeRadius = 1.0f;
 
 	UPROPERTY(EditAnywhere)
@@ -72,14 +75,6 @@ private:
 	float EndConstraintRadius = 25.0f;
 
 private:
-	struct FCollisionCandidate
-	{
-		int32 AnotherParticleIdx;
-		//FVector AnotherParticleToParticle;
-
-		FCollisionCandidate(int32 _AnotherParticleIdx) : AnotherParticleIdx(_AnotherParticleIdx) {}
-	};
-
 	void UpdateStartEndConstraint();
 	void UpdateRopeBlockers();
 	void SolveRopeBlockersCollisionConstraint();
@@ -92,9 +87,11 @@ private:
 	TArray<FVector> ParentPositions;
 	TArray<FVector> ChildPositions;
 	FTransform InvActorTransform = FTransform::Identity;
+	float ToleranceSquared = 0.01f;
 
 	//TODO: UPROPERTYをつけるとUHTが通らないのであきらめる
 	TArray<TPair<FVector, FVector>> RopeBlockerTriMeshEdgeArray;
+	TArray<int32> EdgeIdxOfPositions;
 
 public:
 	/** Returns NiagaraComponent subobject **/
