@@ -102,14 +102,6 @@ private:
 	float ImpulseVelocityPerOver = 1.0f;
 
 private:
-	struct FCollisionCandidate
-	{
-		int32 AnotherParticleIdx;
-		//FVector AnotherParticleToParticle;
-
-		FCollisionCandidate(int32 _AnotherParticleIdx) : AnotherParticleIdx(_AnotherParticleIdx) {}
-	};
-
 	void UpdateRopeBlockers();
 	void Integrate(int32 ParticleIdx, float SubStepDeltaSeconds);
 	void SolvePositionConstraint(int32 InFrameExeCount);
