@@ -324,8 +324,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						CollisionStateTransitions[SegmentIdx].EdgeIdx = EdgeIdx;
 						CollisionStateTransitions[SegmentIdx].Point = IntersectPoint;
 						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
+						// また、複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
 						bIntersectionStateChanged = true;
-						continue;
+						break;
 					}
 				}
 				else
@@ -337,7 +338,8 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						CollisionStateTransitions[SegmentIdx + 1].Transition = ECollisionStateTransition::Remove;
 						bIntersectionStateChanged = true;
 						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
-						continue;
+						// また、複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
+						break;
 					}
 				}
 			}
@@ -370,8 +372,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						CollisionStateTransitions[SegmentIdx].EdgeIdx = EdgeIdx;
 						CollisionStateTransitions[SegmentIdx].Point = IntersectPoint;
 						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
+						// また、複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
 						bIntersectionStateChanged = true;
-						continue;
+						break;
 					}
 				}
 				else
@@ -384,7 +387,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						CollisionStateTransitions[SegmentIdx].Transition = ECollisionStateTransition::Remove;
 						bIntersectionStateChanged = true;
 						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
-						continue;
+						// また、複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
+						bIntersectionStateChanged = true;
+						break;
 					}
 				}
 			}
