@@ -294,11 +294,31 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 	}
 
 	// TODO:再帰が必要では。ガウスザイデル的反復？
+
+	// 頂点の削除の判定
+	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	// TODO:実装
+	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles - 2; ParticleIdx++)
+	{
+		// TODO:実装 一個飛ばしでセグメントをチェック
+	}
+
+	// 頂点の追加、エッジ移動の判定
 	for (int32 ParticleIdx = 0; ParticleIdx < NumSegments; ParticleIdx++)
 	{
+		// セグメントの端点のどちらかが削除予定ならカリング
+		if (CollisionStateTransitions[ParticleIdx].Transition == ECollisionStateTransition::Remove
+			|| CollisionStateTransitions[ParticleIdx + 1].Transition == ECollisionStateTransition::Remove)
+		{
+			continue;
+		}
+
 		// TODO:本当はTriangleでなく扇形で見るべきなんだよな。Triangleだと接触判定で漏らす可能性がある
 		// 1フレームだと大きく動かず、扇形をTriangleで近似できる前提のコード
-
+		// ほぼ動いてなければカリング。
+		// TODO:すごくゆっくり動かすとコリジョン判定が漏れる可能性があるが、カリングを重視してToleranceSquared
+		// によってそれがないように調整する方針
 		bool bIntersectionStateChanged = false;
 		if ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared)
 		{
@@ -331,22 +351,12 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					// 複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
 					break;
 				}
-				else
-				{
-					if (EdgeIdxOfPositions[ParticleIdx + 1] == EdgeIdx)
-					{
-						// 既存の衝突しているエッジが衝突してなかったら衝突点の削除
-						// 削除するパーティクルのインデックスはCollisionStateTransitionsのインデックスにするというルール
-						CollisionStateTransitions[ParticleIdx + 1].Transition = ECollisionStateTransition::Remove;
-						bIntersectionStateChanged = true;
-						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
-						// また、複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
-						break;
-					}
-				}
 			}
 		}
 
+		// ほぼ動いてなければカリング。
+		// TODO:すごくゆっくり動かすとコリジョン判定が漏れる可能性があるが、カリングを重視してToleranceSquared
+		// によってそれがないように調整する方針
 		if (!bIntersectionStateChanged // 一方のTriangleで接触変更を検知したらもう一方は判定しない
 			&& (PrevPositions[ParticleIdx + 1] - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
 		{
@@ -380,21 +390,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 					// 複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
 					break;
-				}
-				else
-				{
-					if (EdgeIdxOfPositions[ParticleIdx] == EdgeIdx)
-					{
-						check(ParticleIdx >= 1);
-						// 既存の衝突しているエッジが衝突してなかったら衝突点の削除
-						// 削除するパーティクルのインデックスはCollisionStateTransitionsのインデックスにするというルール
-						CollisionStateTransitions[ParticleIdx].Transition = ECollisionStateTransition::Remove;
-						bIntersectionStateChanged = true;
-						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
-						// また、複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
-						bIntersectionStateChanged = true;
-						break;
-					}
 				}
 			}
 		}
