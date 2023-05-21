@@ -45,10 +45,10 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 #endif
 	}
 
-	for (int32 SegmentIdx = 0; SegmentIdx < NumSegments; SegmentIdx++)
+	for (int32 ParticleIdx = 0; ParticleIdx < NumSegments; ParticleIdx++)
 	{
-		ParentPositions[SegmentIdx] = Positions[SegmentIdx];
-		ChildPositions[SegmentIdx] = Positions[SegmentIdx + 1];
+		ParentPositions[ParticleIdx] = Positions[ParticleIdx];
+		ChildPositions[ParticleIdx] = Positions[ParticleIdx + 1];
 	}
 
 	// Tick()で設定しても、レベルにNiagaraSystemが最初から配置されていると、初回のスポーンでは配列は初期値を使ってしまい
@@ -92,10 +92,10 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 #else
 	ParentPositions.SetNum(NumSegments);
 	ChildPositions.SetNum(NumSegments);
-	for (int32 SegmentIdx = 0; SegmentIdx < NumSegments; SegmentIdx++)
+	for (int32 ParticleIdx = 0; ParticleIdx < NumSegments; ParticleIdx++)
 	{
-		ParentPositions[SegmentIdx] = Positions[SegmentIdx];
-		ChildPositions[SegmentIdx] = Positions[SegmentIdx + 1];
+		ParentPositions[ParticleIdx] = Positions[ParticleIdx];
+		ChildPositions[ParticleIdx] = Positions[ParticleIdx + 1];
 	}
 #endif
 	NiagaraComponent->SetNiagaraVariableInt("NumSegments", NumSegments);
@@ -294,17 +294,17 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 	}
 
 	// TODO:再帰が必要では。ガウスザイデル的反復？
-	for (int32 SegmentIdx = 0; SegmentIdx < NumSegments; SegmentIdx++)
+	for (int32 ParticleIdx = 0; ParticleIdx < NumSegments; ParticleIdx++)
 	{
 		// TODO:本当はTriangleでなく扇形で見るべきなんだよな。Triangleだと接触判定で漏らす可能性がある
 		// 1フレームだと大きく動かず、扇形をTriangleで近似できる前提のコード
 
 		bool bIntersectionStateChanged = false;
-		if ((PrevPositions[SegmentIdx] - Positions[SegmentIdx]).SizeSquared() > ToleranceSquared)
+		if ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared)
 		{
-			const FVector& TriVert0 = PrevPositions[SegmentIdx];
-			const FVector& TriVert1 = Positions[SegmentIdx];
-			const FVector& TriVert2 = PrevPositions[SegmentIdx + 1];
+			const FVector& TriVert0 = PrevPositions[ParticleIdx];
+			const FVector& TriVert1 = Positions[ParticleIdx];
+			const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
 
 			for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 			{
@@ -316,13 +316,13 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
 				if (bIntersecting)
 				{
-					if (EdgeIdxOfPositions[SegmentIdx + 1] != EdgeIdx)
+					if (EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
 					{
 						// 衝突したものが既存の衝突しているエッジと違った場合
-						CollisionStateTransitions[SegmentIdx].Transition = ECollisionStateTransition::New;
+						CollisionStateTransitions[ParticleIdx].Transition = ECollisionStateTransition::New;
 						// 追加するパーティクルのインデックスはCollisionStateTransitionsのインデックス+1にするというルール
-						CollisionStateTransitions[SegmentIdx].EdgeIdx = EdgeIdx;
-						CollisionStateTransitions[SegmentIdx].Point = IntersectPoint;
+						CollisionStateTransitions[ParticleIdx].EdgeIdx = EdgeIdx;
+						CollisionStateTransitions[ParticleIdx].Point = IntersectPoint;
 						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
 						bIntersectionStateChanged = true;
 						// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
@@ -333,11 +333,11 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				}
 				else
 				{
-					if (EdgeIdxOfPositions[SegmentIdx + 1] == EdgeIdx)
+					if (EdgeIdxOfPositions[ParticleIdx + 1] == EdgeIdx)
 					{
 						// 既存の衝突しているエッジが衝突してなかったら衝突点の削除
 						// 削除するパーティクルのインデックスはCollisionStateTransitionsのインデックスにするというルール
-						CollisionStateTransitions[SegmentIdx + 1].Transition = ECollisionStateTransition::Remove;
+						CollisionStateTransitions[ParticleIdx + 1].Transition = ECollisionStateTransition::Remove;
 						bIntersectionStateChanged = true;
 						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
 						// また、複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
@@ -348,11 +348,11 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		}
 
 		if (!bIntersectionStateChanged // 一方のTriangleで接触変更を検知したらもう一方は判定しない
-			&& (PrevPositions[SegmentIdx + 1] - Positions[SegmentIdx + 1]).SizeSquared() > ToleranceSquared)
+			&& (PrevPositions[ParticleIdx + 1] - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
 		{
-			const FVector& TriVert0 = PrevPositions[SegmentIdx];
-			const FVector& TriVert1 = Positions[SegmentIdx + 1];
-			const FVector& TriVert2 = PrevPositions[SegmentIdx + 1];
+			const FVector& TriVert0 = PrevPositions[ParticleIdx];
+			const FVector& TriVert1 = Positions[ParticleIdx + 1];
+			const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
 
 			// TODO: 上のifブロックと処理が冗長
 			for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
@@ -365,14 +365,14 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
 				if (bIntersecting)
 				{
-					if (EdgeIdxOfPositions[SegmentIdx] != EdgeIdx)
+					if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx)
 					{
 						// 衝突したものが既存の衝突しているエッジと違った場合
-						CollisionStateTransitions[SegmentIdx].Transition = ECollisionStateTransition::New;
-						// TODO:既にCollisionStateTransitions[SegmentIdx].Transition==ECollisionStateTransition::Removeだったケースに対応してない
+						CollisionStateTransitions[ParticleIdx].Transition = ECollisionStateTransition::New;
+						// TODO:既にCollisionStateTransitions[ParticleIdx].Transition==ECollisionStateTransition::Removeだったケースに対応してない
 						// 追加するパーティクルのインデックスはCollisionStateTransitionsのインデックス+1にするというルール
-						CollisionStateTransitions[SegmentIdx].EdgeIdx = EdgeIdx;
-						CollisionStateTransitions[SegmentIdx].Point = IntersectPoint;
+						CollisionStateTransitions[ParticleIdx].EdgeIdx = EdgeIdx;
+						CollisionStateTransitions[ParticleIdx].Point = IntersectPoint;
 						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
 						bIntersectionStateChanged = true;
 						// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
@@ -383,12 +383,12 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				}
 				else
 				{
-					if (EdgeIdxOfPositions[SegmentIdx] == EdgeIdx)
+					if (EdgeIdxOfPositions[ParticleIdx] == EdgeIdx)
 					{
-						check(SegmentIdx >= 1);
+						check(ParticleIdx >= 1);
 						// 既存の衝突しているエッジが衝突してなかったら衝突点の削除
 						// 削除するパーティクルのインデックスはCollisionStateTransitionsのインデックスにするというルール
-						CollisionStateTransitions[SegmentIdx].Transition = ECollisionStateTransition::Remove;
+						CollisionStateTransitions[ParticleIdx].Transition = ECollisionStateTransition::Remove;
 						bIntersectionStateChanged = true;
 						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
 						// また、複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
