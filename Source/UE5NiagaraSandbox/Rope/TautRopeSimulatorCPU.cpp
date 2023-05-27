@@ -161,6 +161,7 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 	// コリジョンがPrimitiveComponent単位で増減することを想定し、呼ばれるたびにマップを作り直す
 	//TODO: PrimitiveComponent内のコリジョンシェイプの増減は想定してない
+	OverlapPrimitives.Reset();
 	RopeBlockerTriMeshEdgeArray.Reset();
 
 	for (const FOverlapResult& Overlap : Overlaps)
@@ -170,6 +171,8 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 		{
 			continue;
 		}
+
+		OverlapPrimitives.Add(Primitive);
 
 		// ローカル座標に変換
 		const FTransform& ActorTM = Primitive->GetComponentTransform() * InvActorTransform;
@@ -301,7 +304,43 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles - 2; ParticleIdx++)
 	{
-		// TODO:実装 一個飛ばしでセグメントをチェック
+		Chaos::FReal OutTime;
+		Chaos::FVec3 OutPosition;
+		Chaos::FVec3 OutNormal;
+		int32 OutFaceIndex;
+
+		//TODO: 衝突するTriMeshが変わった場合への対応は未実装
+		bool bIntersectionExist = false;
+		for (const UPrimitiveComponent* Primitive : OverlapPrimitives)
+		{
+			// PrimitiveComponent内のローカル座標に変換
+			const FTransform& PrimitiveTM = GetActorTransform() * Primitive->GetComponentTransform().Inverse();
+			const FVector& StartPoint = PrimitiveTM.TransformPosition(Positions[ParticleIdx]);
+			const FVector& EndPoint = PrimitiveTM.TransformPosition(Positions[ParticleIdx + 2]);
+			Chaos::FReal Thickness = 0.0;
+
+			Chaos::FVec3 Dir;
+			Chaos::FReal Length;
+			(EndPoint - StartPoint).ToDirectionAndLength(Dir, Length);
+
+			for (const TSharedPtr<Chaos::FTriangleMeshImplicitObject, ESPMode::ThreadSafe>& TriMesh : Primitive->GetBodyInstance()->GetBodySetup()->ChaosTriMeshes)
+			{
+				bool bHit = TriMesh->Raycast(StartPoint, Dir, Length, Thickness, OutTime, OutPosition, OutNormal, OutFaceIndex);
+				if (bHit)
+				{
+					bIntersectionExist = true;
+					break;
+				}
+			}
+		}
+
+
+		if (!bIntersectionExist)
+		{
+			CollisionStateTransitions[ParticleIdx + 1].Transition = ECollisionStateTransition::Remove;
+			CollisionStateTransitions[ParticleIdx + 1].EdgeIdx = INDEX_NONE;
+			CollisionStateTransitions[ParticleIdx + 1].Point = FVector::ZeroVector;
+		}
 	}
 
 	// 頂点の追加、エッジ移動の判定

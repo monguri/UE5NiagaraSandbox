@@ -92,7 +92,7 @@ private:
 	//TODO: UPROPERTYをつけるとUHTが通らないのであきらめる
 	TArray<TPair<FVector, FVector>> RopeBlockerTriMeshEdgeArray;
 	TArray<int32> EdgeIdxOfPositions;
-
+	TArray<const class UPrimitiveComponent*> OverlapPrimitives;
 public:
 	/** Returns NiagaraComponent subobject **/
 	class UNiagaraComponent* GetNiagaraComponent() const { return NiagaraComponent; }
