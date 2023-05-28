@@ -401,6 +401,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			// エッジを検出するのを防ぐ
 			const FVector& TriVert2 = PrevPositions[ParticleIdx + 1] + (TriVert0 - PrevPositions[ParticleIdx + 1]).GetSafeNormal() * Tolerance;
 
+			double NearestEdgeDistanceSq = DBL_MAX;
+			FVector NearestIntersectPoint = FVector::ZeroVector;
+			int32 NearestEdgeIdx = INDEX_NONE;
 			for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 			{
 				const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
@@ -413,28 +416,41 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				{
 					if (EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
 					{
-						// 衝突したものが既存の衝突しているエッジと違った場合
-						CollisionStateTransitions[ParticleIdx].Transition = ECollisionStateTransition::New;
-						// 追加するパーティクルのインデックスはCollisionStateTransitionsのインデックス+1にするというルール
-						CollisionStateTransitions[ParticleIdx].EdgeIdx = EdgeIdx;
-						CollisionStateTransitions[ParticleIdx].Point = IntersectPoint;
-						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
-						bIntersectionStateChanged = true;
-						// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
-
-						// 0-1-2の配列で1がエッジ接触してるときに0を素早く動かして0-2間がコリジョンに
-						// 重ならなかったとき、1にRemoveがついている。
-						// Cubeの周りをぐるっと囲んだときにそうなりうる。
-						// しかし、0-1間で新たなエッジ接触があった場合は1のRemoveを取り消すべき
-						if (CollisionStateTransitions[ParticleIdx + 1].Transition == ECollisionStateTransition::Remove)
+						// 動いてる頂点の元の位置と最も近いエッジを採用
+						// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
+						double EdgeDistanceSq = (IntersectPoint - TriVert0).SizeSquared();
+						if (EdgeDistanceSq < NearestEdgeDistanceSq)
 						{
-							CollisionStateTransitions[ParticleIdx + 1].Transition = ECollisionStateTransition::None;
+							// 等距離なら最も若いインデックスを採用する
+							NearestEdgeDistanceSq = EdgeDistanceSq;
+							NearestIntersectPoint = IntersectPoint;
+							NearestEdgeIdx = EdgeIdx;
 						}
 					}
-
-					// 複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
-					break;
 				}
+			}
+
+			if (NearestEdgeIdx != INDEX_NONE)
+			{
+				// 衝突したものが既存の衝突しているエッジと違った場合
+				CollisionStateTransitions[ParticleIdx].Transition = ECollisionStateTransition::New;
+				// 追加するパーティクルのインデックスはCollisionStateTransitionsのインデックス+1にするというルール
+				CollisionStateTransitions[ParticleIdx].EdgeIdx = NearestEdgeIdx;
+				CollisionStateTransitions[ParticleIdx].Point = NearestIntersectPoint;
+				// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
+				bIntersectionStateChanged = true;
+				// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
+
+#if 0
+				// 0-1-2の配列で1がエッジ接触してるときに0を素早く動かして0-2間がコリジョンに
+				// 重ならなかったとき、1にRemoveがついている。
+				// Cubeの周りをぐるっと囲んだときにそうなりうる。
+				// しかし、0-1間で新たなエッジ接触があった場合は1のRemoveを取り消すべき
+				if (CollisionStateTransitions[ParticleIdx + 1].Transition == ECollisionStateTransition::Remove)
+				{
+					CollisionStateTransitions[ParticleIdx + 1].Transition = ECollisionStateTransition::None;
+				}
+#endif
 			}
 		}
 
@@ -453,6 +469,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			const FVector& TriVert0 = PrevPositions[ParticleIdx] + (TriVert2 - PrevPositions[ParticleIdx]).GetSafeNormal() * Tolerance;
 
 			// TODO: 上のifブロックと処理が冗長
+			double NearestEdgeDistanceSq = DBL_MAX;
+			FVector NearestIntersectPoint = FVector::ZeroVector;
+			int32 NearestEdgeIdx = INDEX_NONE;
 			for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 			{
 				const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
@@ -465,20 +484,31 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				{
 					if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx)
 					{
-						// 衝突したものが既存の衝突しているエッジと違った場合
-						CollisionStateTransitions[ParticleIdx].Transition = ECollisionStateTransition::New;
-						// TODO:既にCollisionStateTransitions[ParticleIdx].Transition==ECollisionStateTransition::Removeだったケースに対応してない
-						// 追加するパーティクルのインデックスはCollisionStateTransitionsのインデックス+1にするというルール
-						CollisionStateTransitions[ParticleIdx].EdgeIdx = EdgeIdx;
-						CollisionStateTransitions[ParticleIdx].Point = IntersectPoint;
-						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
-						bIntersectionStateChanged = true;
-						// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
+						// 動いてる頂点の元の位置と最も近いエッジを採用
+						// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
+						double EdgeDistanceSq = (IntersectPoint - TriVert2).SizeSquared();
+						if (EdgeDistanceSq < NearestEdgeDistanceSq)
+						{
+							// 等距離なら最も若いインデックスを採用する
+							NearestEdgeDistanceSq = EdgeDistanceSq;
+							NearestIntersectPoint = IntersectPoint;
+							NearestEdgeIdx = EdgeIdx;
+						}
 					}
-
-					// 複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
-					break;
 				}
+			}
+
+			if (NearestEdgeIdx != INDEX_NONE)
+			{
+				// 衝突したものが既存の衝突しているエッジと違った場合
+				CollisionStateTransitions[ParticleIdx].Transition = ECollisionStateTransition::New;
+				// TODO:既にCollisionStateTransitions[ParticleIdx].Transition==ECollisionStateTransition::Removeだったケースに対応してない
+				// 追加するパーティクルのインデックスはCollisionStateTransitionsのインデックス+1にするというルール
+				CollisionStateTransitions[ParticleIdx].EdgeIdx = NearestEdgeIdx;
+				CollisionStateTransitions[ParticleIdx].Point = NearestIntersectPoint;
+				// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
+				bIntersectionStateChanged = true;
+				// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
 			}
 		}
 	}
