@@ -440,17 +440,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
 				bIntersectionStateChanged = true;
 				// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
-
-#if 0
-				// 0-1-2の配列で1がエッジ接触してるときに0を素早く動かして0-2間がコリジョンに
-				// 重ならなかったとき、1にRemoveがついている。
-				// Cubeの周りをぐるっと囲んだときにそうなりうる。
-				// しかし、0-1間で新たなエッジ接触があった場合は1のRemoveを取り消すべき
-				if (CollisionStateTransitions[ParticleIdx + 1].Transition == ECollisionStateTransition::Remove)
-				{
-					CollisionStateTransitions[ParticleIdx + 1].Transition = ECollisionStateTransition::None;
-				}
-#endif
 			}
 		}
 
