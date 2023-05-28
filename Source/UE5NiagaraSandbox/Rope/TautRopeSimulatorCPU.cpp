@@ -166,7 +166,7 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 	for (const FOverlapResult& Overlap : Overlaps)
 	{
-		const UPrimitiveComponent* Primitive = Overlap.GetComponent();
+		UPrimitiveComponent* Primitive = Overlap.GetComponent();
 		if (Primitive == nullptr || Primitive->GetBodyInstance() == nullptr || Primitive->GetBodyInstance()->GetBodySetup() == nullptr)
 		{
 			continue;
@@ -299,41 +299,29 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 	// TODO:再帰が必要では。ガウスザイデル的反復？
 
 	// 頂点の削除の判定
-	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-	// TODO:実装
-	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles - 2; ParticleIdx++)
 	{
-		Chaos::FReal OutTime;
-		Chaos::FVec3 OutPosition;
-		Chaos::FVec3 OutNormal;
-		int32 OutFaceIndex;
+		bool bTraceComplex = false;
+		FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SolveRopeBlockersCollisionConstraint), bTraceComplex);
+		const FVector& Dir = (Positions[ParticleIdx + 2] - Positions[ParticleIdx]).GetSafeNormal();
+		// Toleranceだけ線分の長さを双方から縮めるのは、どちらかあるいは両方がエッジと接触
+		// していたらヒット判定になるため
+		// TODO:もっといい方法ある？
+		const FVector& TraceStartWS = GetActorTransform().TransformPosition(Positions[ParticleIdx] + Dir * Tolerance);
+		const FVector& TraceEndWS = GetActorTransform().TransformPosition(Positions[ParticleIdx + 2] - Dir * Tolerance);
 
 		//TODO: 衝突するTriMeshが変わった場合への対応は未実装
 		bool bIntersectionExist = false;
-		for (const UPrimitiveComponent* Primitive : OverlapPrimitives)
+		for (UPrimitiveComponent* Primitive : OverlapPrimitives)
 		{
-			// PrimitiveComponent内のローカル座標に変換
-			const FTransform& PrimitiveTM = GetActorTransform() * Primitive->GetComponentTransform().Inverse();
-			const FVector& StartPoint = PrimitiveTM.TransformPosition(Positions[ParticleIdx]);
-			const FVector& EndPoint = PrimitiveTM.TransformPosition(Positions[ParticleIdx + 2]);
-			Chaos::FReal Thickness = 0.0;
-
-			Chaos::FVec3 Dir;
-			Chaos::FReal Length;
-			(EndPoint - StartPoint).ToDirectionAndLength(Dir, Length);
-
-			for (const TSharedPtr<Chaos::FTriangleMeshImplicitObject, ESPMode::ThreadSafe>& TriMesh : Primitive->GetBodyInstance()->GetBodySetup()->ChaosTriMeshes)
+			FHitResult HitResult;
+			bool bHit = Primitive->LineTraceComponent(HitResult, TraceStartWS, TraceEndWS, TraceParams);
+			if (bHit)
 			{
-				bool bHit = TriMesh->Raycast(StartPoint, Dir, Length, Thickness, OutTime, OutPosition, OutNormal, OutFaceIndex);
-				if (bHit)
-				{
-					bIntersectionExist = true;
-					break;
-				}
+				bIntersectionExist = true;
+				break;
 			}
 		}
-
 
 		if (!bIntersectionExist)
 		{
