@@ -353,11 +353,15 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		// TODO:すごくゆっくり動かすとコリジョン判定が漏れる可能性があるが、カリングを重視してToleranceSquared
 		// によってそれがないように調整する方針
 		bool bIntersectionStateChanged = false;
-		if ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared)
+		if ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared) // TODO:これは本当に妥当か、バグを生まないか検討
 		{
+			// 動いている頂点
 			const FVector& TriVert0 = PrevPositions[ParticleIdx];
 			const FVector& TriVert1 = Positions[ParticleIdx];
-			const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
+			
+			// 固定している頂点の方は、動いた頂点の方に少し移動しておく。こうやって、すでに接触している
+			// エッジを検出するのを防ぐ
+			const FVector& TriVert2 = PrevPositions[ParticleIdx + 1] + (TriVert0 - PrevPositions[ParticleIdx + 1]).GetSafeNormal() * Tolerance;
 
 			for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 			{
@@ -402,9 +406,13 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		if (!bIntersectionStateChanged // 一方のTriangleで接触変更を検知したらもう一方は判定しない
 			&& (PrevPositions[ParticleIdx + 1] - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
 		{
-			const FVector& TriVert0 = PrevPositions[ParticleIdx];
+			// 動いている頂点
 			const FVector& TriVert1 = Positions[ParticleIdx + 1];
 			const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
+			
+			// 固定している頂点の方は、動いた頂点の方に少し移動しておく。こうやって、すでに接触している
+			// エッジを検出するのを防ぐ
+			const FVector& TriVert0 = PrevPositions[ParticleIdx] + (TriVert2 - PrevPositions[ParticleIdx]).GetSafeNormal() * Tolerance;
 
 			// TODO: 上のifブロックと処理が冗長
 			for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
