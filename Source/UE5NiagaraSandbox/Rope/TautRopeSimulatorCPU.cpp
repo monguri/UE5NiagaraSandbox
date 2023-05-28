@@ -292,31 +292,69 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 	// 頂点の削除の判定
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles - 2; ParticleIdx++)
 	{
+		// 0-2の線分の削除だけで判定していないのは、なにかに1をひっかけている状態で
+		// 0-2を大きく動かすと0-2線分上にコリジョンがいない状態になり削除対象になってしまうから
+		// TODO:本当は3つのライントレースでなくTriangleとコリジョンのOverlapをとりたかったがAPIがなかった
+		// TODO:もっといいやり方あるかも
+
 		bool bTraceComplex = false;
 		FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SolveRopeBlockersCollisionConstraint), bTraceComplex);
-		const FVector& Dir = (Positions[ParticleIdx + 2] - Positions[ParticleIdx]).GetSafeNormal();
-		// Toleranceだけ線分の長さを双方から縮めるのは、どちらかあるいは両方がエッジと接触
-		// していたらヒット判定になるため
+		// Toleranceだけ0と2を双方から縮めるのは、どちらかあるいは両方がエッジと接触
+		// していたらそのエッジとヒット判定になり、1の削除判定をしたいのにできないため
 		// TODO:もっといい方法ある？
-		const FVector& TraceStartWS = GetActorTransform().TransformPosition(Positions[ParticleIdx] + Dir * Tolerance);
-		const FVector& TraceEndWS = GetActorTransform().TransformPosition(Positions[ParticleIdx + 2] - Dir * Tolerance);
+		// Toleranceだけ1を0-2の線分側に近づけるのは、1がエッジと接触してると接触判定し続けるため
+		// TODO:もっといい方法ある？
+		const FVector& TriVert0 = Positions[ParticleIdx] + (Positions[ParticleIdx + 2] - Positions[ParticleIdx]).GetSafeNormal() * Tolerance;
+		const FVector& TriVert1 = Positions[ParticleIdx + 1] + ((Positions[ParticleIdx] + Positions[ParticleIdx + 2]) * 0.5 - Positions[ParticleIdx + 1]).GetSafeNormal() * Tolerance;
+		const FVector& TriVert2 = Positions[ParticleIdx + 2] + (Positions[ParticleIdx] - Positions[ParticleIdx + 2]).GetSafeNormal() * Tolerance;
 
-		//TODO: 衝突するTriMeshが変わった場合への対応は未実装
+		const FVector& TriVertWS0 = GetActorTransform().TransformPosition(TriVert0);
+		const FVector& TriVertWS1 = GetActorTransform().TransformPosition(TriVert1);
+		const FVector& TriVertWS2 = GetActorTransform().TransformPosition(TriVert2);
+
 		bool bIntersectionExist = false;
 		for (UPrimitiveComponent* Primitive : OverlapPrimitives)
 		{
 			FHitResult HitResult;
-			bool bHit = Primitive->LineTraceComponent(HitResult, TraceStartWS, TraceEndWS, TraceParams);
-			
+			bool bHit = Primitive->LineTraceComponent(HitResult, TriVertWS0, TriVertWS1, TraceParams);
 #if 1 // UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
 
-			DrawDebugLine(GetWorld(), TraceStartWS, bHit ? HitResult.Location : TraceEndWS, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+			DrawDebugLine(GetWorld(), TriVertWS0, bHit ? HitResult.Location : TriVertWS1, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
 			if(bHit)
 			{
-				DrawDebugLine(GetWorld(), HitResult.Location, TraceEndWS, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+				DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS1, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
 			}
 #endif
+			if (bHit)
+			{
+				bIntersectionExist = true;
+				break;
+			}
 
+			bHit = Primitive->LineTraceComponent(HitResult, TriVertWS1, TriVertWS2, TraceParams);
+#if 1 // UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+
+			DrawDebugLine(GetWorld(), TriVertWS1, bHit ? HitResult.Location : TriVertWS2, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+			if(bHit)
+			{
+				DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS2, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+			}
+#endif
+			if (bHit)
+			{
+				bIntersectionExist = true;
+				break;
+			}
+
+			bHit = Primitive->LineTraceComponent(HitResult, TriVertWS2, TriVertWS0, TraceParams);
+#if 1 // UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+
+			DrawDebugLine(GetWorld(), TriVertWS2, bHit ? HitResult.Location : TriVertWS0, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+			if(bHit)
+			{
+				DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS0, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+			}
+#endif
 			if (bHit)
 			{
 				bIntersectionExist = true;
