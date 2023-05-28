@@ -267,24 +267,15 @@ namespace NiagaraSandbox::RopeSimulator
 void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 {
 	using namespace NiagaraSandbox::RopeSimulator;
-#if 0 // ComplexコリジョンのTriangleMeshの収集したエッジのデバッグ描画
-#if ENABLE_DRAW_DEBUG
-	if (GetWorld() != nullptr)
+#if 1 // ComplexコリジョンのTriangleMeshの収集したエッジのデバッグ描画
+	for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 	{
-		for (const TPair<TWeakObjectPtr<const class UPrimitiveComponent>, TArray<TPair<FVector, FVector>>>& Pair : RopeBlockerTriMeshEdgeArray)
-		{
-			const TArray<TPair<FVector, FVector>>& EdgeArray = Pair.Value;
-
-			for (const TPair<FVector, FVector>& Edge : EdgeArray)
-			{
-				const FVector& LineStart = InvActorTransform.InverseTransformPosition(Edge.Key);
-				const FVector& LineEnd = InvActorTransform.InverseTransformPosition(Edge.Value);
-				DrawDebugLine(GetWorld(), LineStart, LineEnd, FLinearColor::Red.ToFColorSRGB());
-			}
-		}
+		const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+		const FVector& LineStartWS = GetActorTransform().TransformPosition(Edge.Key);
+		const FVector& LineEndWS = GetActorTransform().TransformPosition(Edge.Value);
+		DrawDebugLine(GetWorld(), LineStartWS, LineEndWS, FLinearColor::Red.ToFColorSRGB());
 	}
 #endif
-#else
 
 	TArray<FCollisionStateTransition> CollisionStateTransitions;
 	CollisionStateTransitions.SetNum(NumParticles);
@@ -316,6 +307,16 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		{
 			FHitResult HitResult;
 			bool bHit = Primitive->LineTraceComponent(HitResult, TraceStartWS, TraceEndWS, TraceParams);
+			
+#if 1 // UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+
+			DrawDebugLine(GetWorld(), TraceStartWS, bHit ? HitResult.Location : TraceEndWS, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+			if(bHit)
+			{
+				DrawDebugLine(GetWorld(), HitResult.Location, TraceEndWS, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+			}
+#endif
+
 			if (bHit)
 			{
 				bIntersectionExist = true;
@@ -326,21 +327,26 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		if (!bIntersectionExist)
 		{
 			CollisionStateTransitions[ParticleIdx + 1].Transition = ECollisionStateTransition::Remove;
-			CollisionStateTransitions[ParticleIdx + 1].EdgeIdx = INDEX_NONE;
-			CollisionStateTransitions[ParticleIdx + 1].Point = FVector::ZeroVector;
+			// EdgeIdxの初期化はしない。
+			// 0-1-2の配列で1がエッジ接触してるときに2を素早く動かして0-2間がコリジョンに
+			// 重ならなかったとき、1にRemoveがつく。
+			// Cubeの周りをぐるっと囲んだときにそうなりうる。
+			// しかし、1-2間で新たなエッジ接触があった場合は1のEdgeIdxと違うインデックスかを判定して
+			// 1をNewにしてRemoveを取り消すので
+
+			// 0-1-2の配列で1がエッジ接触してるときに0を素早く動かして0-2間がコリジョンに
+			// 重ならなかったとき、1にRemoveがついている。
+			// Cubeの周りをぐるっと囲んだときにそうなりうる。
+			// しかし、0-1間で新たなエッジ接触があった場合は1のEdgeIdxと違うインデックスかを判定して
+			// 0をNewにして1のRemoveを取り消すので
+
+			// Pointの初期化もとりあえずしない。なんの判定にも使っておらず必要ないので
 		}
 	}
 
 	// 頂点の追加、エッジ移動の判定
 	for (int32 ParticleIdx = 0; ParticleIdx < NumSegments; ParticleIdx++)
 	{
-		// セグメントの端点のどちらかが削除予定ならカリング
-		if (CollisionStateTransitions[ParticleIdx].Transition == ECollisionStateTransition::Remove
-			|| CollisionStateTransitions[ParticleIdx + 1].Transition == ECollisionStateTransition::Remove)
-		{
-			continue;
-		}
-
 		// TODO:本当はTriangleでなく扇形で見るべきなんだよな。Triangleだと接触判定で漏らす可能性がある
 		// 1フレームだと大きく動かず、扇形をTriangleで近似できる前提のコード
 		// ほぼ動いてなければカリング。
@@ -373,6 +379,15 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						// 十分細いTriangleだという前提で、二つのエッジに一度に接触するケースは考慮しない
 						bIntersectionStateChanged = true;
 						// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
+
+						// 0-1-2の配列で1がエッジ接触してるときに0を素早く動かして0-2間がコリジョンに
+						// 重ならなかったとき、1にRemoveがついている。
+						// Cubeの周りをぐるっと囲んだときにそうなりうる。
+						// しかし、0-1間で新たなエッジ接触があった場合は1のRemoveを取り消すべき
+						if (CollisionStateTransitions[ParticleIdx + 1].Transition == ECollisionStateTransition::Remove)
+						{
+							CollisionStateTransitions[ParticleIdx + 1].Transition = ECollisionStateTransition::None;
+						}
 					}
 
 					// 複数のエッジがまじわる頂点と接触しても最初に検出したエッジのみ使用する
@@ -451,7 +466,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 	NumParticles += IncreasedCount;
 	NumSegments = NumParticles - 1;
-#endif
 }
 
 ATautRopeSimulatorCPU::ATautRopeSimulatorCPU()
