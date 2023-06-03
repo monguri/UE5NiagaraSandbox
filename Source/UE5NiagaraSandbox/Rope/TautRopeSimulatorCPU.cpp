@@ -262,6 +262,13 @@ namespace NiagaraSandbox::RopeSimulator
 		int32 EdgeIdx = INDEX_NONE;
 		FVector Point = FVector::ZeroVector;
 	};
+
+	//TODO: FMath::PointDistToSegment()が結果をfloatにキャストして戻り値にしてるのでしょうがなく
+	double PointDistToSegment(const FVector &Point, const FVector &StartPoint, const FVector &EndPoint)
+	{
+		const FVector& ClosestPoint = FMath::ClosestPointOnSegment(Point, StartPoint, EndPoint);
+		return (Point - ClosestPoint).Size();
+	}
 }
 
 void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
@@ -401,6 +408,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			// エッジを検出するのを防ぐ
 			const FVector& TriVert2 = PrevPositions[ParticleIdx + 1] + (TriVert0 - PrevPositions[ParticleIdx + 1]).GetSafeNormal() * Tolerance;
 
+			//TODO: FMath::PointDistToSegment()が戻り値がfloatで固定されてるのでしょうがなく
 			double NearestEdgeDistanceSq = DBL_MAX;
 			FVector NearestIntersectPoint = FVector::ZeroVector;
 			int32 NearestEdgeIdx = INDEX_NONE;
@@ -416,9 +424,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				{
 					if (EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
 					{
-						// 動いてる頂点の元の位置と最も近いエッジを採用
+						// 元の線分と最も近いエッジを採用
 						// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
-						double EdgeDistanceSq = (IntersectPoint - TriVert0).SizeSquared();
+						double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
 						if (EdgeDistanceSq < NearestEdgeDistanceSq)
 						{
 							// 等距離なら最も若いインデックスを採用する
@@ -473,9 +481,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				{
 					if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx)
 					{
-						// 動いてる頂点の元の位置と最も近いエッジを採用
+						// 元の線分と最も近いエッジを採用
 						// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
-						double EdgeDistanceSq = (IntersectPoint - TriVert2).SizeSquared();
+						double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
 						if (EdgeDistanceSq < NearestEdgeDistanceSq)
 						{
 							// 等距離なら最も若いインデックスを採用する
