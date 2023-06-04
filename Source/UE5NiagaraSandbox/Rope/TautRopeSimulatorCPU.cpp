@@ -20,8 +20,8 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 	ToleranceSquared = Tolerance * Tolerance; // TODO:リアルタイムには更新しない
 
 	// まずは一つの線分から
-	NumParticles = 2;
-	NumSegments = NumParticles - 1;
+	int32 NumParticles = 2;
+	int32 NumSegments = NumParticles - 1;
 
 	Positions.SetNum(NumParticles);
 	PrevPositions.SetNum(NumParticles);
@@ -35,7 +35,7 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 		EdgeIdxOfPositions[ParticleIdx] = INDEX_NONE;
 	}
 
-	for (int32 ParticleIdx = 0; ParticleIdx < NumSegments; ParticleIdx++)
+	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles - 1; ParticleIdx++)
 	{
 		ParentPositions[ParticleIdx] = Positions[ParticleIdx];
 		ChildPositions[ParticleIdx] = Positions[ParticleIdx + 1];
@@ -61,7 +61,7 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 
 	if (DeltaSeconds > KINDA_SMALL_NUMBER)
 	{
-		for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ParticleIdx++)
+		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx++)
 		{
 			PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 		}
@@ -71,9 +71,10 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 		SolveRopeBlockersCollisionConstraint();
 	}
 
-	check(NumParticles >= 2);
-	check(NumSegments >= 1);
+	check(Positions.Num() >= 2);
+	check(Positions.Num() == PrevPositions.Num());
 	// 直接サイズとインデックス指定でコピーする方法がないので一旦別変数にコピーしてMove。
+	int32 NumSegments = Positions.Num() - 1;
 	TArray<FVector> TmpParentPositions(Positions.GetData(), NumSegments);
 	TArray<FVector> TmpChildPositions(&Positions.GetData()[1], NumSegments);
 	ParentPositions = MoveTemp(TmpParentPositions);
@@ -203,23 +204,6 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 namespace NiagaraSandbox::RopeSimulator
 {
-#if 0
-	// TODO:衝突エッジが変わってなくて衝突位置が変化してるケースに未対応
-	enum class ECollisionStateTransition : uint8
-	{
-		None,
-		New,
-		Remove,
-	};
-
-	struct FCollisionStateTransition
-	{
-		ECollisionStateTransition Transition = ECollisionStateTransition::None;
-		int32 EdgeIdx = INDEX_NONE;
-		FVector Point = FVector::ZeroVector;
-	};
-#endif
-
 	//TODO: FMath::PointDistToSegment()が結果をfloatにキャストして戻り値にしてるのでしょうがなく
 	double PointDistToSegment(const FVector &Point, const FVector &StartPoint, const FVector &EndPoint)
 	{
@@ -242,20 +226,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			DrawDebugLine(GetWorld(), LineStartWS, LineEndWS, FLinearColor::Red.ToFColorSRGB());
 		}
 	}
-
-#if 0
-	TArray<FCollisionStateTransition> CollisionStateTransitions;
-	CollisionStateTransitions.SetNum(NumParticles);
-
-	for (FCollisionStateTransition& CollisionState : CollisionStateTransitions)
-	{
-		//TODO:初期化必要？
-		CollisionState.Transition = ECollisionStateTransition::None;
-		CollisionState.EdgeIdx = INDEX_NONE;
-	}
-#endif
-
-	// TODO:再帰が必要では。ガウスザイデル的反復？
 
 	// 頂点の削除の判定
 	// 削除なので逆順のループ
@@ -342,9 +312,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			PrevPositions.RemoveAt(ParticleIdx - 1);
 			Positions.RemoveAt(ParticleIdx - 1);
 			EdgeIdxOfPositions.RemoveAt(ParticleIdx - 1);
-
-			NumParticles--;
-			NumSegments = NumParticles - 1;
 		}
 	}
 
@@ -402,8 +369,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 				Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 				EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
-				NumParticles++;
-				NumSegments = NumParticles - 1;
 				// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
 
 				// 今回のParticleIdxと追加した頂点の間の線分で次のループで他のエッジ接触がないかチェックする
@@ -460,8 +425,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 				Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 				EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
-				NumParticles++;
-				NumSegments = NumParticles - 1;
 				// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
 				// 次のループでは追加した頂点とParticleIdx+1だった動いてる頂点のTriangleでエッジ判定する
 			}

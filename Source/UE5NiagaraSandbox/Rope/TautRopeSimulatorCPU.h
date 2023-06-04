@@ -86,8 +86,6 @@ private:
 	void SolveRopeBlockersCollisionConstraint();
 
 private:
-	int32 NumParticles = 2;
-	int32 NumSegments = 1;
 	TArray<FVector> Positions;
 	TArray<FVector> PrevPositions;
 	TArray<FVector> ParentPositions;
