@@ -141,11 +141,8 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 		return;
 	}
 
-#if 1
+	// OverlapクエリはSimpleコリジョンへのクエリで十分と判断
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(UpdateRopeBlockers), false);
-#else // ComplexコリジョンのTriangleMeshの収集したエッジのデバッグ描画
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(UpdateRopeBlockers), true);
-#endif
 
 	GetWorld()->OverlapMultiByObjectType(Overlaps, GetActorLocation() + OverlapQueryBox.GetCenter(), GetActorQuat(), ObjectParams, FCollisionShape::MakeBox(OverlapQueryBox.GetExtent()), Params);
 
