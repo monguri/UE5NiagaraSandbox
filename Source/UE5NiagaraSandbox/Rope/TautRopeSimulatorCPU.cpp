@@ -83,21 +83,11 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 
 	check(NumParticles >= 2);
 	check(NumSegments >= 1);
-#if 1
 	// 直接サイズとインデックス指定でコピーする方法がないので一旦別変数にコピーしてMove。
 	TArray<FVector> TmpParentPositions(Positions.GetData(), NumSegments);
 	TArray<FVector> TmpChildPositions(&Positions.GetData()[1], NumSegments);
 	ParentPositions = MoveTemp(TmpParentPositions);
 	ChildPositions = MoveTemp(TmpChildPositions);
-#else
-	ParentPositions.SetNum(NumSegments);
-	ChildPositions.SetNum(NumSegments);
-	for (int32 ParticleIdx = 0; ParticleIdx < NumSegments; ParticleIdx++)
-	{
-		ParentPositions[ParticleIdx] = Positions[ParticleIdx];
-		ChildPositions[ParticleIdx] = Positions[ParticleIdx + 1];
-	}
-#endif
 	NiagaraComponent->SetNiagaraVariableInt("NumSegments", NumSegments);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ParentPositions"), ParentPositions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ChildPositions"), ChildPositions);
