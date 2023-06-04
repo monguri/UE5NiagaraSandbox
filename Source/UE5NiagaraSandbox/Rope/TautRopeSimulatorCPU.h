@@ -51,6 +51,12 @@ private:
 
 private:
 	UPROPERTY(EditAnywhere)
+	bool bDrawCollisionEdge = false;
+
+	UPROPERTY(EditAnywhere)
+	bool bDrawTraceToRemove = false;
+
+	UPROPERTY(EditAnywhere)
 	float Tolerance = 0.1f;
 
 	UPROPERTY(EditAnywhere)

@@ -33,16 +33,6 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 	{
 		PrevPositions[ParticleIdx] = PrevPositions[ParticleIdx] = Positions[ParticleIdx] = FVector::XAxisVector * 100.0f * ParticleIdx; // 1mの長さの線分
 		EdgeIdxOfPositions[ParticleIdx] = INDEX_NONE;
-#if 0
-		if (ParticleIdx % 2 == 0)
-		{
-			Orientations[ParticleIdx] = InitialOrientations[ParticleIdx] = FQuat(FVector::ZAxisVector, PI / 2) * FQuat(FVector::XAxisVector, PI / 2);
-		}
-		else
-		{
-			Orientations[ParticleIdx] = InitialOrientations[ParticleIdx] = FQuat(FVector::XAxisVector, PI / 2);
-		}
-#endif
 	}
 
 	for (int32 ParticleIdx = 0; ParticleIdx < NumSegments; ParticleIdx++)
@@ -91,28 +81,6 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 	NiagaraComponent->SetNiagaraVariableInt("NumSegments", NumSegments);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ParentPositions"), ParentPositions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ChildPositions"), ChildPositions);
-
-#if 0
-	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ++ParticleIdx)
-	{
-		// 初期配置がローカル座標でZ軸負方向にチェインがのびていて、そのときに回転が0という前提。
-		// 子供と自分の位置差分ベクトルをパーティクルの向きとする。
-		if (ParticleIdx == NumParticles - 1)
-		{
-			// TODO:ダミーパーティクルはやらず親と自分の位置差分にするので親のパーティクルと向きが同じになる
-			// という問題は残っている
-			const FVector& ParentToSelf = Positions[ParticleIdx] - Positions[ParticleIdx - 1];
-			Orientations[ParticleIdx] = FQuat::FindBetween(-FVector::ZAxisVector, ParentToSelf) * InitialOrientations[ParticleIdx];
-		}
-		else
-		{
-			const FVector& SelfToChild = Positions[ParticleIdx + 1] - Positions[ParticleIdx];
-			Orientations[ParticleIdx] = FQuat::FindBetween(-FVector::ZAxisVector, SelfToChild) * InitialOrientations[ParticleIdx];
-		}
-	}
-
-	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
-#endif
 }
 
 void ATautRopeSimulatorCPU::UpdateStartEndConstraint()
@@ -261,15 +229,17 @@ namespace NiagaraSandbox::RopeSimulator
 void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 {
 	using namespace NiagaraSandbox::RopeSimulator;
-#if 1 // ComplexコリジョンのTriangleMeshの収集したエッジのデバッグ描画
-	for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+
+	if (bDrawCollisionEdge)
 	{
-		const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
-		const FVector& LineStartWS = GetActorTransform().TransformPosition(Edge.Key);
-		const FVector& LineEndWS = GetActorTransform().TransformPosition(Edge.Value);
-		DrawDebugLine(GetWorld(), LineStartWS, LineEndWS, FLinearColor::Red.ToFColorSRGB());
+		for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+		{
+			const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+			const FVector& LineStartWS = GetActorTransform().TransformPosition(Edge.Key);
+			const FVector& LineEndWS = GetActorTransform().TransformPosition(Edge.Value);
+			DrawDebugLine(GetWorld(), LineStartWS, LineEndWS, FLinearColor::Red.ToFColorSRGB());
+		}
 	}
-#endif
 
 	TArray<FCollisionStateTransition> CollisionStateTransitions;
 	CollisionStateTransitions.SetNum(NumParticles);
@@ -311,14 +281,16 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		{
 			FHitResult HitResult;
 			bool bHit = Primitive->LineTraceComponent(HitResult, TriVertWS0, TriVertWS1, TraceParams);
-#if 1 // UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-
-			DrawDebugLine(GetWorld(), TriVertWS0, bHit ? HitResult.Location : TriVertWS1, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-			if(bHit)
+			if (bDrawTraceToRemove)
 			{
-				DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS1, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+				// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+				DrawDebugLine(GetWorld(), TriVertWS0, bHit ? HitResult.Location : TriVertWS1, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+				if(bHit)
+				{
+					DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS1, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+				}
 			}
-#endif
+
 			if (bHit)
 			{
 				bIntersectionExist = true;
@@ -326,14 +298,16 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			}
 
 			bHit = Primitive->LineTraceComponent(HitResult, TriVertWS1, TriVertWS2, TraceParams);
-#if 1 // UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-
-			DrawDebugLine(GetWorld(), TriVertWS1, bHit ? HitResult.Location : TriVertWS2, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-			if(bHit)
+			if (bDrawTraceToRemove)
 			{
-				DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS2, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+				// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+				DrawDebugLine(GetWorld(), TriVertWS1, bHit ? HitResult.Location : TriVertWS2, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+				if(bHit)
+				{
+					DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS2, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+				}
 			}
-#endif
+
 			if (bHit)
 			{
 				bIntersectionExist = true;
@@ -341,14 +315,16 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			}
 
 			bHit = Primitive->LineTraceComponent(HitResult, TriVertWS2, TriVertWS0, TraceParams);
-#if 1 // UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-
-			DrawDebugLine(GetWorld(), TriVertWS2, bHit ? HitResult.Location : TriVertWS0, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-			if(bHit)
+			if (bDrawTraceToRemove)
 			{
-				DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS0, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+				// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+				DrawDebugLine(GetWorld(), TriVertWS2, bHit ? HitResult.Location : TriVertWS0, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+				if(bHit)
+				{
+					DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS0, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+				}
 			}
-#endif
+
 			if (bHit)
 			{
 				bIntersectionExist = true;
