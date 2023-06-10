@@ -17,7 +17,7 @@ public:
 
 	virtual void PostRegisterAllComponents() override;
 
-	virtual void PreInitializeComponents() override;
+	virtual void BeginPlay() override;
 	virtual void Tick( float DeltaSeconds ) override;
 
 	/** Set true for this actor to self-destruct when the Niagara system finishes, false otherwise */

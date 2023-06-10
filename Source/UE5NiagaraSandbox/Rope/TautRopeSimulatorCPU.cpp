@@ -11,12 +11,11 @@
 #include "Chaos/TriangleMeshImplicitObject.h"
 #include "DrawDebugHelpers.h"
 
-void ATautRopeSimulatorCPU::PreInitializeComponents()
+void ATautRopeSimulatorCPU::BeginPlay()
 {
-	Super::PreInitializeComponents();
+	Super::BeginPlay();
 
 	// 何度も使うのでキャッシュしておく
-	InvActorTransform = GetActorTransform().Inverse();
 	ToleranceSquared = Tolerance * Tolerance; // TODO:リアルタイムには更新しない
 
 	// まずは一つの線分から
@@ -29,9 +28,11 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 	ChildPositions.SetNum(NumSegments);
 	EdgeIdxOfPositions.SetNum(NumParticles);
 
+	UpdateStartEndConstraint();
+
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles; ParticleIdx++)
 	{
-		PrevPositions[ParticleIdx] = PrevPositions[ParticleIdx] = Positions[ParticleIdx] = FVector::XAxisVector * 100.0f * ParticleIdx; // 1mの長さの線分
+		PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 		EdgeIdxOfPositions[ParticleIdx] = INDEX_NONE;
 	}
 
@@ -40,16 +41,6 @@ void ATautRopeSimulatorCPU::PreInitializeComponents()
 		ParentPositions[ParticleIdx] = Positions[ParticleIdx];
 		ChildPositions[ParticleIdx] = Positions[ParticleIdx + 1];
 	}
-
-	// Tick()で設定しても、レベルにNiagaraSystemが最初から配置されていると、初回のスポーンでは配列は初期値を使ってしまい
-	//間に合わないのでBeginPlay()でも設定する
-
-	// パーティクル数でなくセグメント数をNumParticlesには設定する
-	NiagaraComponent->SetNiagaraVariableInt("NumSegments", NumSegments);
-
-	NiagaraComponent->SetNiagaraVariableFloat("RopeRadius", RopeRadius);
-	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ParentPositions"), ParentPositions);
-	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ChildPositions"), ChildPositions);
 }
 
 void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
@@ -298,9 +289,13 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			const FVector& TriVert1 = Positions[ParticleIdx + 1];
 			const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
 			
+			// 固定している頂点は前回の判定と違ってPrevPositonsでなくPositionsなのに注意。
+			// こうしないと1フレームでParticlesIdxの頂点が大きく動いたとき交差検出が漏れるケースがある
+			// https://www.gdcvault.com/play/1027351/Rope-Simulation-in-Uncharted-4
+			// の32分ごろの例。
 			// 固定している頂点の方は、動いた頂点の方に少し移動しておく。こうやって、すでに接触している
 			// エッジを検出するのを防ぐ
-			const FVector& TriVert0 = PrevPositions[ParticleIdx] + (TriVert2 - PrevPositions[ParticleIdx]).GetSafeNormal() * Tolerance;
+			const FVector& TriVert0 = Positions[ParticleIdx] + (TriVert2 - Positions[ParticleIdx]).GetSafeNormal() * Tolerance;
 
 			// TODO: 上のifブロックと処理が冗長
 			double NearestEdgeDistanceSq = DBL_MAX;
