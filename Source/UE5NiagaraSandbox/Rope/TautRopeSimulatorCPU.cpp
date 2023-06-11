@@ -218,215 +218,233 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		}
 	}
 
-	// 頂点の追加、エッジ移動の判定
-	// ループの中で追加している
-	for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num() - 1; ParticleIdx++)
+	// MovementPhaseとCollisionPhaseの全セグメントのイテレーション。収束するまでループする。
+	bool bExistMovedParticle = false;
+	do
 	{
-		// TODO:本当はTriangleでなく扇形で見るべきなんだよな。Triangleだと接触判定で漏らす可能性がある
-		// 1フレームだと大きく動かず、扇形をTriangleで近似できる前提のコード
-		// ほぼ動いてなければカリング。
-		// TODO:すごくゆっくり動かすとコリジョン判定が漏れる可能性があるが、カリングを重視してToleranceSquared
-		// によってそれがないように調整する方針
-		if ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared) // TODO:これは本当に妥当か、バグを生まないか検討
+		// 頂点の追加、エッジ移動の判定
+		// ループの中で追加している
+		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num() - 1; ParticleIdx++)
 		{
-			// 動いている頂点
-			const FVector& TriVert0 = PrevPositions[ParticleIdx];
-			const FVector& TriVert1 = Positions[ParticleIdx];
-			
-			// 固定している頂点の方は、動いた頂点の方に少し移動しておく。こうやって、すでに接触している
-			// エッジを検出するのを防ぐ
-			const FVector& TriVert2 = PrevPositions[ParticleIdx + 1] + (TriVert0 - PrevPositions[ParticleIdx + 1]).GetSafeNormal() * Tolerance;
+			//
+			// MovementPhase
+			// TODO:実装。
+			//
 
-			//TODO: FMath::PointDistToSegment()が戻り値がfloatで固定されてるのでしょうがなく
-			double NearestEdgeDistanceSq = DBL_MAX;
-			FVector NearestIntersectPoint = FVector::ZeroVector;
-			int32 NearestEdgeIdx = INDEX_NONE;
-			for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+			//
+			// CollisionPhase
+			// TODO:関数化してもいいな。ParticleIdx引数の関数。そもそもMovementPhaseで動いてなければスキップ
+			// 
+			// TODO:本当はTriangleでなく扇形で見るべきなんだよな。Triangleだと接触判定で漏らす可能性がある
+			// 1フレームだと大きく動かず、扇形をTriangleで近似できる前提のコード
+			// ほぼ動いてなければカリング。
+			// TODO:すごくゆっくり動かすとコリジョン判定が漏れる可能性があるが、カリングを重視してToleranceSquared
+			// によってそれがないように調整する方針
+			if ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared) // TODO:これは本当に妥当か、バグを生まないか検討
 			{
-				const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
-				const FVector& RayStart = Edge.Key;
-				const FVector& RayEnd = Edge.Value;
-				FVector IntersectPoint;
-				FVector IntersectNormal;
-				bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
-				if (bIntersecting)
+				// 動いている頂点
+				const FVector& TriVert0 = PrevPositions[ParticleIdx];
+				const FVector& TriVert1 = Positions[ParticleIdx];
+				
+				// 固定している頂点の方は、動いた頂点の方に少し移動しておく。こうやって、すでに接触している
+				// エッジを検出するのを防ぐ
+				const FVector& TriVert2 = PrevPositions[ParticleIdx + 1] + (TriVert0 - PrevPositions[ParticleIdx + 1]).GetSafeNormal() * Tolerance;
+
+				//TODO: FMath::PointDistToSegment()が戻り値がfloatで固定されてるのでしょうがなく
+				double NearestEdgeDistanceSq = DBL_MAX;
+				FVector NearestIntersectPoint = FVector::ZeroVector;
+				int32 NearestEdgeIdx = INDEX_NONE;
+				for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 				{
-					if (EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
+					const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+					const FVector& RayStart = Edge.Key;
+					const FVector& RayEnd = Edge.Value;
+					FVector IntersectPoint;
+					FVector IntersectNormal;
+					bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
+					if (bIntersecting)
 					{
-						// 元の線分と最も近いエッジを採用
-						// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
-						double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
-						if (EdgeDistanceSq < NearestEdgeDistanceSq)
+						if (EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
 						{
-							// 等距離なら最も若いインデックスを採用する
-							NearestEdgeDistanceSq = EdgeDistanceSq;
-							NearestIntersectPoint = IntersectPoint;
-							NearestEdgeIdx = EdgeIdx;
+							// 元の線分と最も近いエッジを採用
+							// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
+							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
+							if (EdgeDistanceSq < NearestEdgeDistanceSq)
+							{
+								// 等距離なら最も若いインデックスを採用する
+								NearestEdgeDistanceSq = EdgeDistanceSq;
+								NearestIntersectPoint = IntersectPoint;
+								NearestEdgeIdx = EdgeIdx;
+							}
 						}
 					}
 				}
-			}
 
-			if (NearestEdgeIdx != INDEX_NONE)
-			{
-				PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
-				Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
-				EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
-				// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
-
-				// 今回のParticleIdxと追加した頂点の間の線分で次のループで他のエッジ接触がないかチェックする
-				ParticleIdx--;
-				continue;
-			}
-		}
-
-		// ほぼ動いてなければカリング。
-		// TODO:すごくゆっくり動かすとコリジョン判定が漏れる可能性があるが、カリングを重視してToleranceSquared
-		// によってそれがないように調整する方針
-		if ((PrevPositions[ParticleIdx + 1] - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
-		{
-			// 動いている頂点
-			const FVector& TriVert1 = Positions[ParticleIdx + 1];
-			const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
-			
-			// 固定している頂点は前回の判定と違ってPrevPositonsでなくPositionsなのに注意。
-			// こうしないと1フレームでParticlesIdxの頂点が大きく動いたとき交差検出が漏れるケースがある
-			// https://www.gdcvault.com/play/1027351/Rope-Simulation-in-Uncharted-4
-			// の32分ごろの例。
-			// 固定している頂点の方は、動いた頂点の方に少し移動しておく。こうやって、すでに接触している
-			// エッジを検出するのを防ぐ
-			const FVector& TriVert0 = Positions[ParticleIdx] + (TriVert2 - Positions[ParticleIdx]).GetSafeNormal() * Tolerance;
-
-			// TODO: 上のifブロックと処理が冗長
-			double NearestEdgeDistanceSq = DBL_MAX;
-			FVector NearestIntersectPoint = FVector::ZeroVector;
-			int32 NearestEdgeIdx = INDEX_NONE;
-			for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
-			{
-				const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
-				const FVector& RayStart = Edge.Key;
-				const FVector& RayEnd = Edge.Value;
-				FVector IntersectPoint;
-				FVector IntersectNormal;
-				bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
-				if (bIntersecting)
+				if (NearestEdgeIdx != INDEX_NONE)
 				{
-					if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx)
+					PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
+					Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
+					EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
+					// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
+
+					// 今回のParticleIdxと追加した頂点の間の線分で次のループで他のエッジ接触がないかチェックする
+					ParticleIdx--;
+					continue;
+				}
+			}
+
+			// ほぼ動いてなければカリング。
+			// TODO:すごくゆっくり動かすとコリジョン判定が漏れる可能性があるが、カリングを重視してToleranceSquared
+			// によってそれがないように調整する方針
+			if ((PrevPositions[ParticleIdx + 1] - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
+			{
+				// 動いている頂点
+				const FVector& TriVert1 = Positions[ParticleIdx + 1];
+				const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
+				
+				// 固定している頂点は前回の判定と違ってPrevPositonsでなくPositionsなのに注意。
+				// こうしないと1フレームでParticlesIdxの頂点が大きく動いたとき交差検出が漏れるケースがある
+				// https://www.gdcvault.com/play/1027351/Rope-Simulation-in-Uncharted-4
+				// の32分ごろの例。
+				// 固定している頂点の方は、動いた頂点の方に少し移動しておく。こうやって、すでに接触している
+				// エッジを検出するのを防ぐ
+				const FVector& TriVert0 = Positions[ParticleIdx] + (TriVert2 - Positions[ParticleIdx]).GetSafeNormal() * Tolerance;
+
+				// TODO: 上のifブロックと処理が冗長
+				double NearestEdgeDistanceSq = DBL_MAX;
+				FVector NearestIntersectPoint = FVector::ZeroVector;
+				int32 NearestEdgeIdx = INDEX_NONE;
+				for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+				{
+					const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+					const FVector& RayStart = Edge.Key;
+					const FVector& RayEnd = Edge.Value;
+					FVector IntersectPoint;
+					FVector IntersectNormal;
+					bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
+					if (bIntersecting)
 					{
-						// 元の線分と最も近いエッジを採用
-						// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
-						double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
-						if (EdgeDistanceSq < NearestEdgeDistanceSq)
+						if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx)
 						{
-							// 等距離なら最も若いインデックスを採用する
-							NearestEdgeDistanceSq = EdgeDistanceSq;
-							NearestIntersectPoint = IntersectPoint;
-							NearestEdgeIdx = EdgeIdx;
+							// 元の線分と最も近いエッジを採用
+							// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
+							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
+							if (EdgeDistanceSq < NearestEdgeDistanceSq)
+							{
+								// 等距離なら最も若いインデックスを採用する
+								NearestEdgeDistanceSq = EdgeDistanceSq;
+								NearestIntersectPoint = IntersectPoint;
+								NearestEdgeIdx = EdgeIdx;
+							}
 						}
 					}
 				}
+
+				if (NearestEdgeIdx != INDEX_NONE)
+				{
+					PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
+					Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
+					EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
+					// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
+					// 次のループでは追加した頂点とParticleIdx+1だった動いてる頂点のTriangleでエッジ判定する
+				}
+			}
+		}
+
+		// TODO:セグメントごとのMovementPhaseとCollisionPhaseの切り替えを実装すれば、削除も
+		// CollisionPhaseの中に実装が移動する予定。
+		// 
+		// 頂点の削除の判定
+		// 削除なので逆順のループ
+		// 追加/修正より削除を後にする。追加はPrevPositonsも見て判定しているが、削除はPositonsしか見てないので
+		// 追加/修正した後のPositionsで判断すべき
+		for (int32 ParticleIdx = Positions.Num() - 1; ParticleIdx >= 2; ParticleIdx--)
+		{
+			// 0-2の線分の削除だけで判定していないのは、なにかに1をひっかけている状態で
+			// 0-2を大きく動かすと0-2線分上にコリジョンがいない状態になり削除対象になってしまうから
+			// TODO:本当は3つのライントレースでなくTriangleとコリジョンのOverlapをとりたかったがAPIがなかった
+			// TODO:もっといいやり方あるかも
+
+			bool bTraceComplex = false;
+			FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SolveRopeBlockersCollisionConstraint), bTraceComplex);
+			// Toleranceだけ0と2を双方から縮めるのは、どちらかあるいは両方がエッジと接触
+			// していたらそのエッジとヒット判定になり、1の削除判定をしたいのにできないため
+			// TODO:もっといい方法ある？
+			// Toleranceだけ1を0-2の線分側に近づけるのは、1がエッジと接触してると接触判定し続けるため
+			// TODO:もっといい方法ある？
+			const FVector& TriVert0 = Positions[ParticleIdx] + (Positions[ParticleIdx - 2] - Positions[ParticleIdx]).GetSafeNormal() * Tolerance;
+			const FVector& TriVert1 = Positions[ParticleIdx - 1] + ((Positions[ParticleIdx] + Positions[ParticleIdx - 2]) * 0.5 - Positions[ParticleIdx - 1]).GetSafeNormal() * Tolerance;
+			const FVector& TriVert2 = Positions[ParticleIdx - 2] + (Positions[ParticleIdx] - Positions[ParticleIdx - 2]).GetSafeNormal() * Tolerance;
+
+			const FVector& TriVertWS0 = GetActorTransform().TransformPosition(TriVert0);
+			const FVector& TriVertWS1 = GetActorTransform().TransformPosition(TriVert1);
+			const FVector& TriVertWS2 = GetActorTransform().TransformPosition(TriVert2);
+
+			bool bIntersectionExist = false;
+			for (UPrimitiveComponent* Primitive : OverlapPrimitives)
+			{
+				FHitResult HitResult;
+				bool bHit = Primitive->LineTraceComponent(HitResult, TriVertWS0, TriVertWS1, TraceParams);
+				if (bDrawTraceToRemove)
+				{
+					// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+					DrawDebugLine(GetWorld(), TriVertWS0, bHit ? HitResult.Location : TriVertWS1, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+					if(bHit)
+					{
+						DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS1, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+					}
+				}
+
+				if (bHit)
+				{
+					bIntersectionExist = true;
+					break;
+				}
+
+				bHit = Primitive->LineTraceComponent(HitResult, TriVertWS1, TriVertWS2, TraceParams);
+				if (bDrawTraceToRemove)
+				{
+					// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+					DrawDebugLine(GetWorld(), TriVertWS1, bHit ? HitResult.Location : TriVertWS2, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+					if(bHit)
+					{
+						DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS2, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+					}
+				}
+
+				if (bHit)
+				{
+					bIntersectionExist = true;
+					break;
+				}
+
+				bHit = Primitive->LineTraceComponent(HitResult, TriVertWS2, TriVertWS0, TraceParams);
+				if (bDrawTraceToRemove)
+				{
+					// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+					DrawDebugLine(GetWorld(), TriVertWS2, bHit ? HitResult.Location : TriVertWS0, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+					if(bHit)
+					{
+						DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS0, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+					}
+				}
+
+				if (bHit)
+				{
+					bIntersectionExist = true;
+					break;
+				}
 			}
 
-			if (NearestEdgeIdx != INDEX_NONE)
+			if (!bIntersectionExist)
 			{
-				PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
-				Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
-				EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
-				// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
-				// 次のループでは追加した頂点とParticleIdx+1だった動いてる頂点のTriangleでエッジ判定する
+				PrevPositions.RemoveAt(ParticleIdx - 1);
+				Positions.RemoveAt(ParticleIdx - 1);
+				EdgeIdxOfPositions.RemoveAt(ParticleIdx - 1);
 			}
 		}
 	}
-
-	// 頂点の削除の判定
-	// 削除なので逆順のループ
-	// 追加/修正より削除を後にする。追加はPrevPositonsも見て判定しているが、削除はPositonsしか見てないので
-	// 追加/修正した後のPositionsで判断すべき
-	for (int32 ParticleIdx = Positions.Num() - 1; ParticleIdx >= 2; ParticleIdx--)
-	{
-		// 0-2の線分の削除だけで判定していないのは、なにかに1をひっかけている状態で
-		// 0-2を大きく動かすと0-2線分上にコリジョンがいない状態になり削除対象になってしまうから
-		// TODO:本当は3つのライントレースでなくTriangleとコリジョンのOverlapをとりたかったがAPIがなかった
-		// TODO:もっといいやり方あるかも
-
-		bool bTraceComplex = false;
-		FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SolveRopeBlockersCollisionConstraint), bTraceComplex);
-		// Toleranceだけ0と2を双方から縮めるのは、どちらかあるいは両方がエッジと接触
-		// していたらそのエッジとヒット判定になり、1の削除判定をしたいのにできないため
-		// TODO:もっといい方法ある？
-		// Toleranceだけ1を0-2の線分側に近づけるのは、1がエッジと接触してると接触判定し続けるため
-		// TODO:もっといい方法ある？
-		const FVector& TriVert0 = Positions[ParticleIdx] + (Positions[ParticleIdx - 2] - Positions[ParticleIdx]).GetSafeNormal() * Tolerance;
-		const FVector& TriVert1 = Positions[ParticleIdx - 1] + ((Positions[ParticleIdx] + Positions[ParticleIdx - 2]) * 0.5 - Positions[ParticleIdx - 1]).GetSafeNormal() * Tolerance;
-		const FVector& TriVert2 = Positions[ParticleIdx - 2] + (Positions[ParticleIdx] - Positions[ParticleIdx - 2]).GetSafeNormal() * Tolerance;
-
-		const FVector& TriVertWS0 = GetActorTransform().TransformPosition(TriVert0);
-		const FVector& TriVertWS1 = GetActorTransform().TransformPosition(TriVert1);
-		const FVector& TriVertWS2 = GetActorTransform().TransformPosition(TriVert2);
-
-		bool bIntersectionExist = false;
-		for (UPrimitiveComponent* Primitive : OverlapPrimitives)
-		{
-			FHitResult HitResult;
-			bool bHit = Primitive->LineTraceComponent(HitResult, TriVertWS0, TriVertWS1, TraceParams);
-			if (bDrawTraceToRemove)
-			{
-				// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-				DrawDebugLine(GetWorld(), TriVertWS0, bHit ? HitResult.Location : TriVertWS1, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-				if(bHit)
-				{
-					DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS1, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
-				}
-			}
-
-			if (bHit)
-			{
-				bIntersectionExist = true;
-				break;
-			}
-
-			bHit = Primitive->LineTraceComponent(HitResult, TriVertWS1, TriVertWS2, TraceParams);
-			if (bDrawTraceToRemove)
-			{
-				// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-				DrawDebugLine(GetWorld(), TriVertWS1, bHit ? HitResult.Location : TriVertWS2, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-				if(bHit)
-				{
-					DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS2, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
-				}
-			}
-
-			if (bHit)
-			{
-				bIntersectionExist = true;
-				break;
-			}
-
-			bHit = Primitive->LineTraceComponent(HitResult, TriVertWS2, TriVertWS0, TraceParams);
-			if (bDrawTraceToRemove)
-			{
-				// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-				DrawDebugLine(GetWorld(), TriVertWS2, bHit ? HitResult.Location : TriVertWS0, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-				if(bHit)
-				{
-					DrawDebugLine(GetWorld(), HitResult.Location, TriVertWS0, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
-				}
-			}
-
-			if (bHit)
-			{
-				bIntersectionExist = true;
-				break;
-			}
-		}
-
-		if (!bIntersectionExist)
-		{
-			PrevPositions.RemoveAt(ParticleIdx - 1);
-			Positions.RemoveAt(ParticleIdx - 1);
-			EdgeIdxOfPositions.RemoveAt(ParticleIdx - 1);
-		}
-	}
+	while (bExistMovedParticle);
 }
 
 ATautRopeSimulatorCPU::ATautRopeSimulatorCPU()
