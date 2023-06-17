@@ -222,17 +222,13 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 	bool bExistMovedParticle = false;
 	do
 	{
-		// 頂点の追加、エッジ移動の判定
-		// ループの中で追加している
+		//
+		// CollisionPhase
+		//
+		// 頂点の追加判定と追加。
+		// TODO:エッジ移動の判定やエッジブロック判定は未実装
 		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num() - 1; ParticleIdx++)
 		{
-			//
-			// MovementPhase
-			// TODO:実装。
-			//
-
-			//
-			// CollisionPhase
 			// TODO:関数化してもいいな。ParticleIdx引数の関数。そもそもMovementPhaseで動いてなければスキップ
 			// 
 			// TODO:本当はTriangleでなく扇形で見るべきなんだよな。Triangleだと接触判定で漏らす可能性がある
@@ -351,10 +347,20 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			}
 		}
 
+		//
+		// MovementPhase
+		//
+		for (int32 ParticleIdx = 1; ParticleIdx < Positions.Num() - 2; ParticleIdx++)
+		{
+		}
+
+		//
+		// DeletePhase
+		//
 		// TODO:セグメントごとのMovementPhaseとCollisionPhaseの切り替えを実装すれば、削除も
 		// CollisionPhaseの中に実装が移動する予定。
 		// 
-		// 頂点の削除の判定
+		// 頂点の削除判定と削除。
 		// 削除なので逆順のループ
 		// 追加/修正より削除を後にする。追加はPrevPositonsも見て判定しているが、削除はPositonsしか見てないので
 		// 追加/修正した後のPositionsで判断すべき
