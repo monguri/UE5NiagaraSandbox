@@ -52,11 +52,6 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 
 	if (DeltaSeconds > KINDA_SMALL_NUMBER)
 	{
-		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx++)
-		{
-			PrevPositions[ParticleIdx] = Positions[ParticleIdx];
-		}
-
 		UpdateStartEndConstraint();
 		UpdateRopeBlockers();
 		SolveRopeBlockersCollisionConstraint();
@@ -352,7 +347,34 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		//
 		for (int32 ParticleIdx = 1; ParticleIdx < Positions.Num() - 2; ParticleIdx++)
 		{
+			bool bMoved = false;
+			const FVector& PreMovedPosition = Positions[ParticleIdx];
+
+			if ((PrevPositions[ParticleIdx - 1] - Positions[ParticleIdx - 1]).SizeSquared() > ToleranceSquared)
+			{
+				//TODO:移動を実装したらコメントアウト外す
+				//bMoved = true;
+			}
+
+			if ((PrevPositions[ParticleIdx + 1] - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
+			{
+				//TODO:移動を実装したらコメントアウト外す
+				//bMoved = true;
+			}
+
+			if (bMoved)
+			{
+				PrevPositions[ParticleIdx] = PreMovedPosition;
+			}
+			else
+			{
+				PrevPositions[ParticleIdx] = Positions[ParticleIdx];
+			}
 		}
+
+		// 両端点はCollisionPhaseとMovementPhaseのイテレーション二回目からは動いてないものとする
+		PrevPositions[0] = Positions[0];
+		PrevPositions[Positions.Num() - 1] = Positions[Positions.Num() - 1];
 
 		//
 		// DeletePhase
@@ -447,6 +469,16 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				PrevPositions.RemoveAt(ParticleIdx - 1);
 				Positions.RemoveAt(ParticleIdx - 1);
 				EdgeIdxOfPositions.RemoveAt(ParticleIdx - 1);
+			}
+		}
+
+		bExistMovedParticle = false;
+		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num() - 1; ParticleIdx++)
+		{
+			if ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared)
+			{
+				bExistMovedParticle = true;
+				break;
 			}
 		}
 	}
