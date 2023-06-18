@@ -27,6 +27,7 @@ void ATautRopeSimulatorCPU::BeginPlay()
 	ParentPositions.SetNum(NumSegments);
 	ChildPositions.SetNum(NumSegments);
 	EdgeIdxOfPositions.SetNum(NumParticles);
+	MovedFlagOfPositions.SetNum(NumParticles);
 
 	UpdateStartEndConstraint();
 
@@ -34,6 +35,7 @@ void ATautRopeSimulatorCPU::BeginPlay()
 	{
 		PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 		EdgeIdxOfPositions[ParticleIdx] = INDEX_NONE;
+		MovedFlagOfPositions[ParticleIdx] = false;
 	}
 
 	for (int32 ParticleIdx = 0; ParticleIdx < NumParticles - 1; ParticleIdx++)
@@ -213,6 +215,17 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		}
 	}
 
+	// 始点と終点のMoved判定
+	if ((PrevPositions[0] - Positions[0]).SizeSquared() > ToleranceSquared)
+	{
+		MovedFlagOfPositions[0] = true;
+	}
+
+	if ((PrevPositions[Positions.Num() - 1] - Positions[Positions.Num() - 1]).SizeSquared() > ToleranceSquared)
+	{
+		MovedFlagOfPositions[Positions.Num() - 1] = true;
+	}
+
 	// MovementPhaseとCollisionPhaseの全セグメントのイテレーション。収束するまでループする。
 	bool bExistMovedParticle = false;
 	do
@@ -231,7 +244,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			// ほぼ動いてなければカリング。
 			// TODO:すごくゆっくり動かすとコリジョン判定が漏れる可能性があるが、カリングを重視してToleranceSquared
 			// によってそれがないように調整する方針
-			if ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared) // TODO:これは本当に妥当か、バグを生まないか検討
+			if (MovedFlagOfPositions[ParticleIdx])
 			{
 				// 動いている頂点
 				const FVector& TriVert0 = PrevPositions[ParticleIdx];
@@ -276,6 +289,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 					Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 					EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
+					MovedFlagOfPositions.Insert(false, ParticleIdx + 1);
 					// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
 
 					// 今回のParticleIdxと追加した頂点の間の線分で次のループで他のエッジ接触がないかチェックする
@@ -287,7 +301,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			// ほぼ動いてなければカリング。
 			// TODO:すごくゆっくり動かすとコリジョン判定が漏れる可能性があるが、カリングを重視してToleranceSquared
 			// によってそれがないように調整する方針
-			if ((PrevPositions[ParticleIdx + 1] - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
+			if (MovedFlagOfPositions[ParticleIdx + 1])
 			{
 				// 動いている頂点
 				const FVector& TriVert1 = Positions[ParticleIdx + 1];
@@ -336,6 +350,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 					Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 					EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
+					MovedFlagOfPositions.Insert(false, ParticleIdx + 1);
 					// TODO:衝突するエッジが別のエッジに変化した場合に対応してない
 					// 次のループでは追加した頂点とParticleIdx+1だった動いてる頂点のTriangleでエッジ判定する
 				}
@@ -351,10 +366,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			FVector PreMovedPosition = Positions[ParticleIdx];
 
 #if 1 // MovementPhaseオンオフ
-			if (
-				((PrevPositions[ParticleIdx - 1] - Positions[ParticleIdx - 1]).SizeSquared() > ToleranceSquared)
-				|| ((PrevPositions[ParticleIdx + 1] - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
-			)
+			if (MovedFlagOfPositions[ParticleIdx - 1] || MovedFlagOfPositions[ParticleIdx + 1])
 			{
 				check(EdgeIdxOfPositions[ParticleIdx] != INDEX_NONE);
 				const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdxOfPositions[ParticleIdx]];
@@ -381,6 +393,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			}
 #endif
 
+			MovedFlagOfPositions[ParticleIdx] = bMoved;
+
+			// PrevPositions[ParticleIdx] = PreMovedPosition;の一行で済むが分岐した方がわかりやすいので分岐
 			if (bMoved)
 			{
 				PrevPositions[ParticleIdx] = PreMovedPosition;
@@ -393,7 +408,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 		// 両端点はCollisionPhaseとMovementPhaseのイテレーション二回目からは動いてないものとする
 		PrevPositions[0] = Positions[0];
+		MovedFlagOfPositions[0] = false;
 		PrevPositions[Positions.Num() - 1] = Positions[Positions.Num() - 1];
+		MovedFlagOfPositions[Positions.Num() - 1] = false;
 
 		//
 		// DeletePhase
@@ -488,13 +505,14 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				PrevPositions.RemoveAt(ParticleIdx - 1);
 				Positions.RemoveAt(ParticleIdx - 1);
 				EdgeIdxOfPositions.RemoveAt(ParticleIdx - 1);
+				MovedFlagOfPositions.RemoveAt(ParticleIdx - 1);
 			}
 		}
 
 		bExistMovedParticle = false;
 		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num() - 1; ParticleIdx++)
 		{
-			if ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared)
+			if (MovedFlagOfPositions[ParticleIdx])
 			{
 				bExistMovedParticle = true;
 				break;

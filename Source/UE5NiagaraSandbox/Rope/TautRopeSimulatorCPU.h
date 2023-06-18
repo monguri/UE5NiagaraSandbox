@@ -97,6 +97,9 @@ private:
 	TArray<TPair<FVector, FVector>> RopeBlockerTriMeshEdgeArray;
 	TArray<int32> EdgeIdxOfPositions;
 	TArray<class UPrimitiveComponent*> OverlapPrimitives; // UPrimitiveComponent::LineTraceComponent()がconstでないのでしょうがなくconstをつけてない
+
+	TArray<bool> MovedFlagOfPositions;
+
 public:
 	/** Returns NiagaraComponent subobject **/
 	class UNiagaraComponent* GetNiagaraComponent() const { return NiagaraComponent; }
