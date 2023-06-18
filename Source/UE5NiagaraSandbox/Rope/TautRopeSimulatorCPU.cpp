@@ -345,22 +345,41 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		//
 		// MovementPhase
 		//
-		for (int32 ParticleIdx = 1; ParticleIdx < Positions.Num() - 2; ParticleIdx++)
+		for (int32 ParticleIdx = 1; ParticleIdx < Positions.Num() - 1; ParticleIdx++) // 両端点は下で別途扱う
 		{
 			bool bMoved = false;
-			const FVector& PreMovedPosition = Positions[ParticleIdx];
+			FVector PreMovedPosition = Positions[ParticleIdx];
 
-			if ((PrevPositions[ParticleIdx - 1] - Positions[ParticleIdx - 1]).SizeSquared() > ToleranceSquared)
+#if 1 // MovementPhaseオンオフ
+			if (
+				((PrevPositions[ParticleIdx - 1] - Positions[ParticleIdx - 1]).SizeSquared() > ToleranceSquared)
+				|| ((PrevPositions[ParticleIdx + 1] - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
+			)
 			{
-				//TODO:移動を実装したらコメントアウト外す
-				//bMoved = true;
-			}
+				check(EdgeIdxOfPositions[ParticleIdx] != INDEX_NONE);
+				const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdxOfPositions[ParticleIdx]];
+				const FVector& EdgeStart = Edge.Key;
+				const FVector& EdgeEnd = Edge.Value;
 
-			if ((PrevPositions[ParticleIdx + 1] - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
-			{
-				//TODO:移動を実装したらコメントアウト外す
-				//bMoved = true;
+				const FVector& StartPoint = Positions[ParticleIdx - 1];
+				const FVector& EndPoint = Positions[ParticleIdx + 1];
+
+				// 動いてるのがStartPointであろうとEndPointであろうとStartPointPlane側を回転させて
+				// 最短交点を計算する
+
+				// エッジの直線に垂線を下ろした点
+				const FVector& StartPointDropFoot = FMath::ClosestPointOnInfiniteLine(EdgeStart, EdgeEnd, StartPoint);
+				const FVector& EndPointDropFoot = FMath::ClosestPointOnInfiniteLine(EdgeStart, EdgeEnd, EndPoint);
+
+				double StartPointPerpLen = (StartPoint - StartPointDropFoot).Size();
+				double EndPointPerpLen = (EndPoint - EndPointDropFoot).Size();
+				
+				// 最短になる交点は垂線の長さの比による線形補間で決まる
+				Positions[ParticleIdx] = FMath::Lerp(StartPointDropFoot, EndPointDropFoot, StartPointPerpLen / (StartPointPerpLen + EndPointPerpLen));
+
+				bMoved = true;
 			}
+#endif
 
 			if (bMoved)
 			{
