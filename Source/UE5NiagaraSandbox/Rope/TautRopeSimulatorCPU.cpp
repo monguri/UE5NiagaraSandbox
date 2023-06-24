@@ -366,7 +366,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			FVector PreMovedPosition = Positions[ParticleIdx];
 
 #if 1 // MovementPhaseオンオフ
-			if (MovedFlagOfPositions[ParticleIdx - 1] || MovedFlagOfPositions[ParticleIdx + 1])
+			bool bPreParticleMoved = MovedFlagOfPositions[ParticleIdx - 1];
+			bool bPostParticleMoved = MovedFlagOfPositions[ParticleIdx + 1];
+			if (bPreParticleMoved || bPostParticleMoved)
 			{
 				check(EdgeIdxOfPositions[ParticleIdx] != INDEX_NONE);
 				const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdxOfPositions[ParticleIdx]];
@@ -399,6 +401,25 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			if (bMoved)
 			{
 				PrevPositions[ParticleIdx] = PreMovedPosition;
+
+				// trueの頂点がひとつだけ伝搬していくように
+				if (bPreParticleMoved)
+				{
+					MovedFlagOfPositions[ParticleIdx - 1] = false;
+				}
+				else if (bPostParticleMoved)
+				{
+					MovedFlagOfPositions[ParticleIdx + 1] = false;
+				}
+				else
+				{
+					check(false);
+				}
+
+				// trueの頂点が端点以外はひとつだけ伝搬していくようにひとつフラグ立てたらそこでループを抜ける
+				//TODO:本来はCollisionPhaseとMovementPhaseそれぞれで全パーティクルループするのでなく
+				// ひとつのパーティクルでCollisionPhaseとMovementPhaseをイテレーションすべき
+				break;
 			}
 			else
 			{
@@ -406,7 +427,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			}
 		}
 
-		// 両端点はCollisionPhaseとMovementPhaseのイテレーション二回目からは動いてないものとする
+		// 両端点はCollisionPhaseとMovementPhaseのイテレーション二回目からは動いてないのを確実にする
 		PrevPositions[0] = Positions[0];
 		MovedFlagOfPositions[0] = false;
 		PrevPositions[Positions.Num() - 1] = Positions[Positions.Num() - 1];
