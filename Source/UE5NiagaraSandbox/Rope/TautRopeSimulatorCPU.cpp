@@ -249,10 +249,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				// 動いている頂点
 				const FVector& TriVert0 = PrevPositions[ParticleIdx];
 				const FVector& TriVert1 = Positions[ParticleIdx];
-				
-				// 固定している頂点の方は、動いた頂点の方に少し移動しておく。こうやって、すでに接触している
-				// エッジを検出するのを防ぐ
-				const FVector& TriVert2 = PrevPositions[ParticleIdx + 1] + (TriVert0 - PrevPositions[ParticleIdx + 1]).GetSafeNormal() * Tolerance;
+				const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
 
 				//TODO: FMath::PointDistToSegment()が戻り値がfloatで固定されてるのでしょうがなく
 				double NearestEdgeDistanceSq = DBL_MAX;
@@ -268,18 +265,23 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
 					if (bIntersecting)
 					{
-						// 異なるエッジでないものは採用しない
-						if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx && EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
+						// ある程度距離が離れてないと頂点は追加しない。小さなめりこみなら許容
+						// 距離が詰まりすぎると問題が出うるので
+						if ((IntersectPoint - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared && (IntersectPoint - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
 						{
-							// 元の線分と最も近いエッジを採用
-							// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
-							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
-							if (EdgeDistanceSq < NearestEdgeDistanceSq)
+							// 異なるエッジでないものは採用しない
+							if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx && EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
 							{
-								// 等距離なら最も若いインデックスを採用する
-								NearestEdgeDistanceSq = EdgeDistanceSq;
-								NearestIntersectPoint = IntersectPoint;
-								NearestEdgeIdx = EdgeIdx;
+								// 元の線分と最も近いエッジを採用
+								// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
+								double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
+								if (EdgeDistanceSq < NearestEdgeDistanceSq)
+								{
+									// 等距離なら最も若いインデックスを採用する
+									NearestEdgeDistanceSq = EdgeDistanceSq;
+									NearestIntersectPoint = IntersectPoint;
+									NearestEdgeIdx = EdgeIdx;
+								}
 							}
 						}
 					}
@@ -312,9 +314,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				// こうしないと1フレームでParticlesIdxの頂点が大きく動いたとき交差検出が漏れるケースがある
 				// https://www.gdcvault.com/play/1027351/Rope-Simulation-in-Uncharted-4
 				// の32分ごろの例。
-				// 固定している頂点の方は、動いた頂点の方に少し移動しておく。こうやって、すでに接触している
-				// エッジを検出するのを防ぐ
-				const FVector& TriVert0 = Positions[ParticleIdx] + (TriVert2 - Positions[ParticleIdx]).GetSafeNormal() * Tolerance;
+				const FVector& TriVert0 = Positions[ParticleIdx];
 
 				// TODO: 上のifブロックと処理が冗長
 				double NearestEdgeDistanceSq = DBL_MAX;
@@ -330,18 +330,23 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
 					if (bIntersecting)
 					{
-						// 異なるエッジでないものは採用しない
-						if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx && EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
+						// ある程度距離が離れてないと頂点は追加しない。小さなめりこみなら許容
+						// 距離が詰まりすぎると問題が出うるので
+						if ((IntersectPoint - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared && (IntersectPoint - Positions[ParticleIdx + 1]).SizeSquared() > ToleranceSquared)
 						{
-							// 元の線分と最も近いエッジを採用
-							// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
-							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
-							if (EdgeDistanceSq < NearestEdgeDistanceSq)
+							// 異なるエッジでないものは採用しない
+							if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx && EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
 							{
-								// 等距離なら最も若いインデックスを採用する
-								NearestEdgeDistanceSq = EdgeDistanceSq;
-								NearestIntersectPoint = IntersectPoint;
-								NearestEdgeIdx = EdgeIdx;
+								// 元の線分と最も近いエッジを採用
+								// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
+								double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
+								if (EdgeDistanceSq < NearestEdgeDistanceSq)
+								{
+									// 等距離なら最も若いインデックスを採用する
+									NearestEdgeDistanceSq = EdgeDistanceSq;
+									NearestIntersectPoint = IntersectPoint;
+									NearestEdgeIdx = EdgeIdx;
+								}
 							}
 						}
 					}
