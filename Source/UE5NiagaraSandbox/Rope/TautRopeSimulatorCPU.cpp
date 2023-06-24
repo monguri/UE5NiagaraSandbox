@@ -268,7 +268,8 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
 					if (bIntersecting)
 					{
-						if (EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
+						// 異なるエッジでないものは採用しない
+						if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx && EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
 						{
 							// 元の線分と最も近いエッジを採用
 							// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
@@ -329,7 +330,8 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
 					if (bIntersecting)
 					{
-						if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx)
+						// 異なるエッジでないものは採用しない
+						if (EdgeIdxOfPositions[ParticleIdx] != EdgeIdx && EdgeIdxOfPositions[ParticleIdx + 1] != EdgeIdx)
 						{
 							// 元の線分と最も近いエッジを採用
 							// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
