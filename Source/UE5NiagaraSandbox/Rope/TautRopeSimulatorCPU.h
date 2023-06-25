@@ -80,10 +80,14 @@ private:
 	UPROPERTY(EditAnywhere)
 	float EndConstraintRadius = 25.0f;
 
+	UPROPERTY(EditAnywhere)
+	int32 MaxIteration = 50;
+
 private:
 	void UpdateStartEndConstraint();
 	void UpdateRopeBlockers();
 	void SolveRopeBlockersCollisionConstraint();
+	void SolveRopeBlockersCollisionConstraintNew();
 
 private:
 	TArray<FVector> Positions;

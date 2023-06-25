@@ -550,6 +550,74 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 	while (bExistMovedParticle);
 }
 
+void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
+{
+	using namespace NiagaraSandbox::RopeSimulator;
+
+	if (bDrawCollisionEdge)
+	{
+		for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+		{
+			const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+			const FVector& LineStartWS = GetActorTransform().TransformPosition(Edge.Key);
+			const FVector& LineEndWS = GetActorTransform().TransformPosition(Edge.Value);
+			DrawDebugLine(GetWorld(), LineStartWS, LineEndWS, FLinearColor::Red.ToFColorSRGB());
+		}
+	}
+
+	// MovementPhaseとCollisionPhaseの全頂点のイテレーション。収束するまでループする。
+	bool bExistMovedParticle = false;
+
+	for (int32 IterCount = 0; IterCount < MaxIteration && bExistMovedParticle; IterCount++)
+	{
+		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx++)
+		{
+			// MovementPhase
+			bool bNeedCollisionPhase = false;
+			{
+				// 始点と終点以外は最短コンストレイント
+				if (ParticleIdx > 0 && ParticleIdx < Positions.Num() - 1)
+				{
+					// TODO:仮
+					// 単に動いたとき、線分からはずれたとき
+					bNeedCollisionPhase = false;
+				}
+			}
+
+			// CollisionPhase
+			if (bNeedCollisionPhase)
+			{
+				// TODO:実装
+				// 単に動いた時の前後セグメントでの頂点追加
+				// TODO:前セグメントで頂点追加した場合は、次のループでParticleIdx++してはならない。
+				// 線分からはずれたときの、エッジ移動なのか頂点削除なのかの判定
+			}
+
+			if (ParticleIdx == 0 || ParticleIdx == Positions.Num() - 1)
+			{
+				MovedFlagOfPositions[ParticleIdx] = false;
+			}
+			else
+			{
+				// 収束のため閾値つきで動いたかどうか判定
+				MovedFlagOfPositions[ParticleIdx] = ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared);
+			}
+
+			PrevPositions[ParticleIdx] == Positions[ParticleIdx];
+		}
+
+		bExistMovedParticle = false;
+		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num() - 1; ParticleIdx++)
+		{
+			if (MovedFlagOfPositions[ParticleIdx])
+			{
+				bExistMovedParticle = true;
+				break;
+			}
+		}
+	}
+}
+
 ATautRopeSimulatorCPU::ATautRopeSimulatorCPU()
 {
 	PrimaryActorTick.bCanEverTick = true;
