@@ -668,6 +668,12 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 					int32 NearestEdgeIdx = INDEX_NONE;
 					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 					{
+						// 異なるエッジでないものは採用しない
+						if (EdgeIdxOfPositions[ParticleIdx] == EdgeIdx || EdgeIdxOfPositions[ParticleIdx + 1] == EdgeIdx)
+						{
+							continue;
+						}
+
 						const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
 						const FVector& RayStart = Edge.Key;
 						const FVector& RayEnd = Edge.Value;
@@ -722,6 +728,12 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 					int32 NearestEdgeIdx = INDEX_NONE;
 					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 					{
+						// 異なるエッジでないものは採用しない
+						if (EdgeIdxOfPositions[ParticleIdx - 1] == EdgeIdx || EdgeIdxOfPositions[ParticleIdx] == EdgeIdx)
+						{
+							continue;
+						}
+
 						const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
 						const FVector& RayStart = Edge.Key;
 						const FVector& RayEnd = Edge.Value;
