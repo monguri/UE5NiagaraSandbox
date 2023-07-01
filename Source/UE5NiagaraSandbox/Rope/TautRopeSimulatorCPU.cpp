@@ -771,7 +771,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 				}
 			}
 
-			if (bExistAddedParticle)
+			if (!bExistAddedParticle)
 			{
 				PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 			}
