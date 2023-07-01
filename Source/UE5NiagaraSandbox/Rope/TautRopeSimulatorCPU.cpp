@@ -568,6 +568,11 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 
 	// MovementPhaseとCollisionPhaseの全頂点のイテレーション。収束するまでループする。
 	bool bExistMovedParticle = false;
+	if (Positions[0] != PrevPositions[0]
+		|| Positions[Positions.Num() - 1] != PrevPositions[Positions.Num() - 1]) // TODO:Toleranceを入れないでみる
+	{
+		bExistMovedParticle = true;
+	}
 
 	for (int32 IterCount = 0; IterCount < MaxIteration && bExistMovedParticle; IterCount++)
 	{
