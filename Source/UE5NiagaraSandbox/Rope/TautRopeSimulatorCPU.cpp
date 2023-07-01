@@ -56,7 +56,8 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 	{
 		UpdateStartEndConstraint();
 		UpdateRopeBlockers();
-		SolveRopeBlockersCollisionConstraint();
+		//SolveRopeBlockersCollisionConstraint();
+		SolveRopeBlockersCollisionConstraintNew();
 	}
 
 	check(Positions.Num() >= 2);
@@ -570,40 +571,193 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 
 	for (int32 IterCount = 0; IterCount < MaxIteration && bExistMovedParticle; IterCount++)
 	{
-		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx++)
+		bool bExistAddedParticle = false;
+
+		// TODO: 逆方向ループはあとで必要か検討する
+		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx = ((bExistAddedParticle && ParticleIdx == 0) ? 0 : ParticleIdx + 1)) // 始点のときのみ頂点追加があったらもう一度始点で行う
 		{
+			//
 			// MovementPhase
+			//
 			bool bNeedCollisionPhase = false;
+			MovedFlagOfPositions[ParticleIdx] = false;
 			{
-				// 始点と終点以外は最短コンストレイント
-				if (ParticleIdx > 0 && ParticleIdx < Positions.Num() - 1)
+				if (ParticleIdx == 0)
 				{
-					// TODO:仮
-					// 単に動いたとき、線分からはずれたとき
+					if (Positions[0] != PrevPositions[0]) // TODO:Toleranceを入れないでみる
+					{
+						bNeedCollisionPhase = true;
+					}
+
+					// 始点と終点は1フレームに一度しか動かさないので即Movedフラグを下げる
+					MovedFlagOfPositions[ParticleIdx] = false;
+				}
+				else if (ParticleIdx == (Positions.Num() - 1))
+				{
+					if (Positions[Positions.Num() - 1] != PrevPositions[Positions.Num() - 1]) // TODO:Toleranceを入れないでみる
+					{
+						bNeedCollisionPhase = true;
+					}
+
+					// 始点と終点は1フレームに一度しか動かさないので即Movedフラグを下げる
+					MovedFlagOfPositions[ParticleIdx] = false;
+				}
+				else // 始点と終点以外は最短コンストレイント
+				{
+					check(EdgeIdxOfPositions[ParticleIdx] != INDEX_NONE);
+					const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdxOfPositions[ParticleIdx]];
+					const FVector& EdgeStart = Edge.Key;
+					const FVector& EdgeEnd = Edge.Value;
+
+					const FVector& StartPoint = Positions[ParticleIdx - 1];
+					const FVector& EndPoint = Positions[ParticleIdx + 1];
+
+					// 動いてるのがStartPointであろうとEndPointであろうとStartPointPlane側を回転させて
+					// 最短交点を計算する
+
+					// エッジの直線に垂線を下ろした点 // TODO:エッジ移動を考えないので線分でなく直線で足を求めている
+					const FVector& StartPointDropFoot = FMath::ClosestPointOnInfiniteLine(EdgeStart, EdgeEnd, StartPoint);
+					const FVector& EndPointDropFoot = FMath::ClosestPointOnInfiniteLine(EdgeStart, EdgeEnd, EndPoint);
+
+					double StartPointPerpLen = (StartPoint - StartPointDropFoot).Size();
+					double EndPointPerpLen = (EndPoint - EndPointDropFoot).Size();
+					
+					// 最短になる交点は垂線の長さの比による線形補間で決まる
+					double Alpha = StartPointPerpLen / (StartPointPerpLen + EndPointPerpLen);
+					Positions[ParticleIdx] = FMath::Lerp(StartPointDropFoot, EndPointDropFoot, Alpha);
+					// TODO:エッジ移動を考えないので線分外に出たらログを出しておく
+					if (Alpha <= 0.0 || Alpha >= 1.0)
+					{
+						UE_LOG(LogTemp, Log,  TEXT("Alpha = %lf. Shortest constraint generates overgoing edge."), Alpha);
+					}
+
+					// TODO: エッジ移動は考えず、頂点追加も現状始点終点でないセグメントでは起こさない前提で、コリジョンフェイズに入れない
 					bNeedCollisionPhase = false;
+					// 収束のため閾値つきで動いたかどうか判定
+					MovedFlagOfPositions[ParticleIdx] = ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared);
 				}
 			}
 
+			//
 			// CollisionPhase
+			//
+			// 追加頂点があると始点終点はその延長までしか動かさず再度MovementPhaseをやるので延長位置を保存する
+			bExistAddedParticle = false;
+			FVector MovePosition = Positions[ParticleIdx];
 			if (bNeedCollisionPhase)
 			{
 				// TODO:実装
 				// 単に動いた時の前後セグメントでの頂点追加
-				// TODO:前セグメントで頂点追加した場合は、次のループでParticleIdx++してはならない。
-				// 線分からはずれたときの、エッジ移動なのか頂点削除なのかの判定
+				// TODO:エッジ移動と削除はあとで実装する
+				// TODO:現状、頂点追加は始点と終点のセグメント以外では考えない
+				if (ParticleIdx == 0)
+				{
+					// 動いている頂点
+					const FVector& TriVert0 = PrevPositions[ParticleIdx];
+					const FVector& TriVert1 = Positions[ParticleIdx];
+					const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
+
+					//TODO: FMath::PointDistToSegment()が戻り値がfloatで固定されてるのでしょうがなく
+					double NearestEdgeDistanceSq = DBL_MAX;
+					FVector NearestIntersectPoint = FVector::ZeroVector;
+					int32 NearestEdgeIdx = INDEX_NONE;
+					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+					{
+						const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+						const FVector& RayStart = Edge.Key;
+						const FVector& RayEnd = Edge.Value;
+						FVector IntersectPoint;
+						FVector IntersectNormal;
+						bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
+						if (bIntersecting)
+						{
+							// 元の線分と最も近いエッジを採用
+							// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
+							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
+							if (EdgeDistanceSq < NearestEdgeDistanceSq)
+							{
+								// 等距離なら最も若いインデックスを採用する
+								NearestEdgeDistanceSq = EdgeDistanceSq;
+								NearestIntersectPoint = IntersectPoint;
+								NearestEdgeIdx = EdgeIdx;
+							}
+						}
+					}
+
+					// 頂点追加
+					if (NearestEdgeIdx != INDEX_NONE)
+					{
+						// TODO:TriVert0と1の間の点ではなく長さと向きを維持した延長線上の点にしている
+						PrevPositions[ParticleIdx] = TriVert2 + (NearestIntersectPoint - TriVert2).GetSafeNormal() * (TriVert0 - TriVert2).Size();
+
+						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
+						Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
+						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
+						MovedFlagOfPositions.Insert(true, ParticleIdx + 1); // ここでtrueにしてもパーティクルループの自分の番のMovementPhaseで別途判定される
+
+						// MoveHalfwayPositionからPositions[ParticleIdx]の間で動かしてさらに他のエッジ接触がないかチェックする
+						bExistAddedParticle = true;
+					}
+				}
+				else if (ParticleIdx == (Positions.Num() - 1))
+				{
+					// 動いている頂点
+					const FVector& TriVert1 = Positions[ParticleIdx];
+					const FVector& TriVert2 = PrevPositions[ParticleIdx];
+					
+					// 固定している頂点は始点の判定と違ってPrevPositonsでなくPositionsなのに注意。
+					// こうしないと1フレームでParticlesIdxの頂点が大きく動いたとき交差検出が漏れるケースがある
+					// https://www.gdcvault.com/play/1027351/Rope-Simulation-in-Uncharted-4
+					// の32分ごろの例。
+					const FVector& TriVert0 = Positions[ParticleIdx - 1];
+
+					// TODO: 上のifブロックと処理が冗長
+					double NearestEdgeDistanceSq = DBL_MAX;
+					FVector NearestIntersectPoint = FVector::ZeroVector;
+					int32 NearestEdgeIdx = INDEX_NONE;
+					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+					{
+						const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+						const FVector& RayStart = Edge.Key;
+						const FVector& RayEnd = Edge.Value;
+						FVector IntersectPoint;
+						FVector IntersectNormal;
+						bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
+						if (bIntersecting)
+						{
+							// 元の線分と最も近いエッジを採用
+							// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
+							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
+							if (EdgeDistanceSq < NearestEdgeDistanceSq)
+							{
+								// 等距離なら最も若いインデックスを採用する
+								NearestEdgeDistanceSq = EdgeDistanceSq;
+								NearestIntersectPoint = IntersectPoint;
+								NearestEdgeIdx = EdgeIdx;
+							}
+						}
+					}
+
+					if (NearestEdgeIdx != INDEX_NONE)
+					{
+						// TODO:TriVert0と1の間の点ではなく長さと向きを維持した延長線上の点にしている
+						PrevPositions[ParticleIdx] = TriVert0 + (NearestIntersectPoint - TriVert0).GetSafeNormal() * (TriVert2 - TriVert0).Size();
+
+						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx);
+						Positions.Insert(NearestIntersectPoint, ParticleIdx);
+						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx);
+						MovedFlagOfPositions.Insert(true, ParticleIdx); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
+
+						// MoveHalfwayPositionからPositions[ParticleIdx]の間で動かしてさらに他のエッジ接触がないかチェックする
+						bExistAddedParticle = true;
+					}
+				}
 			}
 
-			if (ParticleIdx == 0 || ParticleIdx == Positions.Num() - 1)
+			if (bExistAddedParticle)
 			{
-				MovedFlagOfPositions[ParticleIdx] = false;
+				PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 			}
-			else
-			{
-				// 収束のため閾値つきで動いたかどうか判定
-				MovedFlagOfPositions[ParticleIdx] = ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared);
-			}
-
-			PrevPositions[ParticleIdx] == Positions[ParticleIdx];
 		}
 
 		bExistMovedParticle = false;
