@@ -193,11 +193,11 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 
 namespace NiagaraSandbox::RopeSimulator
 {
-	//TODO: FMath::PointDistToSegment()が結果をfloatにキャストして戻り値にしてるのでしょうがなく
-	double PointDistToSegment(const FVector &Point, const FVector &StartPoint, const FVector &EndPoint)
+	//TODO: FMath::PointDistToSegmentSquared()が結果をfloatにキャストして戻り値にしてるのでしょうがなく
+	double PointDistToSegmentSquared(const FVector &Point, const FVector &StartPoint, const FVector &EndPoint)
 	{
 		const FVector& ClosestPoint = FMath::ClosestPointOnSegment(Point, StartPoint, EndPoint);
-		return (Point - ClosestPoint).Size();
+		return (Point - ClosestPoint).SizeSquared();
 	}
 }
 
@@ -252,7 +252,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				const FVector& TriVert1 = Positions[ParticleIdx];
 				const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
 
-				//TODO: FMath::PointDistToSegment()が戻り値がfloatで固定されてるのでしょうがなく
 				double NearestEdgeDistanceSq = DBL_MAX;
 				FVector NearestIntersectPoint = FVector::ZeroVector;
 				int32 NearestEdgeIdx = INDEX_NONE;
@@ -275,7 +274,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							{
 								// 元の線分と最も近いエッジを採用
 								// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
-								double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
+								double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
 								if (EdgeDistanceSq < NearestEdgeDistanceSq)
 								{
 									// 等距離なら最も若いインデックスを採用する
@@ -340,7 +339,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							{
 								// 元の線分と最も近いエッジを採用
 								// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
-								double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
+								double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
 								if (EdgeDistanceSq < NearestEdgeDistanceSq)
 								{
 									// 等距離なら最も若いインデックスを採用する
@@ -662,7 +661,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 					const FVector& TriVert1 = Positions[ParticleIdx];
 					const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
 
-					//TODO: FMath::PointDistToSegment()が戻り値がfloatで固定されてるのでしょうがなく
 					double NearestEdgeDistanceSq = DBL_MAX;
 					FVector NearestIntersectPoint = FVector::ZeroVector;
 					int32 NearestEdgeIdx = INDEX_NONE;
@@ -684,7 +682,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 						{
 							// 元の線分と最も近いエッジを採用
 							// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
-							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
+							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
 							if (EdgeDistanceSq < NearestEdgeDistanceSq)
 							{
 								// 等距離なら最も若いインデックスを採用する
@@ -698,8 +696,14 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 					// 頂点追加
 					if (NearestEdgeIdx != INDEX_NONE)
 					{
+						// TODO:GDC動画のように延長線上を新たな終点におくと、同一平面に複数エッジがある
+						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
+						// Triangleの辺にエッジがある場合に交差を検出失敗する。
+						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
+#if 0
 						// TODO:TriVert0と1の間の点ではなく長さと向きを維持した延長線上の点にしている
 						PrevPositions[ParticleIdx] = TriVert2 + (NearestIntersectPoint - TriVert2).GetSafeNormal() * (TriVert0 - TriVert2).Size();
+#endif
 
 						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 						Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
@@ -744,7 +748,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 						{
 							// 元の線分と最も近いエッジを採用
 							// TODO:Triangleが複数エッジと接触したとき、これのためにめりこみが発生しうる
-							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegment(IntersectPoint, TriVert0, TriVert2);
+							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
 							if (EdgeDistanceSq < NearestEdgeDistanceSq)
 							{
 								// 等距離なら最も若いインデックスを採用する
@@ -757,8 +761,14 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 
 					if (NearestEdgeIdx != INDEX_NONE)
 					{
+						// TODO:GDC動画のように延長線上を新たな終点におくと、同一平面に複数エッジがある
+						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
+						// Triangleの辺にエッジがある場合に交差を検出失敗する。
+						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
+#if 0
 						// TODO:TriVert0と1の間の点ではなく長さと向きを維持した延長線上の点にしている
 						PrevPositions[ParticleIdx] = TriVert0 + (NearestIntersectPoint - TriVert0).GetSafeNormal() * (TriVert2 - TriVert0).Size();
+#endif
 
 						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx);
 						Positions.Insert(NearestIntersectPoint, ParticleIdx);
