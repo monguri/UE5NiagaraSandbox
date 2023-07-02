@@ -79,13 +79,13 @@ void ATautRopeSimulatorCPU::UpdateStartEndConstraint()
 	{
 		// StartConstraintActorが設定されていればルートをコンストレイント
 		// とりあえずGetActorUpVector()にStartConstraintRadiusだけ離れた位置にコンストレイントさせる形にする
-		Positions[0] = InvActorTransform.TransformPosition(StartConstraintActor->GetActorLocation() + StartConstraintActor->GetActorUpVector() * StartConstraintRadius);
+		Positions[0] = InvActorTransform.TransformPosition(StartConstraintActor->GetRootComponent()->GetSocketLocation(StartConstraintSocket));
 	}
 	if (EndConstraintActor != nullptr)
 	{
 		// EndConstraintActorが設定されていれば末端をコンストレイント
 		// とりあえずGetActorUpVector()にEndConstraintRadiusだけ離れた位置にコンストレイントさせる形にする
-		Positions[Positions.Num() - 1] = InvActorTransform.TransformPosition(EndConstraintActor->GetActorLocation() + EndConstraintActor->GetActorUpVector() * EndConstraintRadius);
+		Positions[Positions.Num() - 1] = InvActorTransform.TransformPosition(EndConstraintActor->GetRootComponent()->GetSocketLocation(EndConstraintSocket));
 	}
 	//TODO:長さ制限を与えてConstraintActor自体をコンストレイントさせるのは後で行う:w
 }

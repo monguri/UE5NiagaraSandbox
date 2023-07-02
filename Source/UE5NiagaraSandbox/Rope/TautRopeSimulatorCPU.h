@@ -72,13 +72,13 @@ private:
 	AActor* StartConstraintActor = nullptr;
 
 	UPROPERTY(EditAnywhere)
-	float StartConstraintRadius = 25.0f;
+	FName StartConstraintSocket;
 
 	UPROPERTY(EditAnywhere)
 	AActor* EndConstraintActor = nullptr;
 
 	UPROPERTY(EditAnywhere)
-	float EndConstraintRadius = 25.0f;
+	FName EndConstraintSocket;
 
 	UPROPERTY(EditAnywhere)
 	int32 MaxIteration = 50;
