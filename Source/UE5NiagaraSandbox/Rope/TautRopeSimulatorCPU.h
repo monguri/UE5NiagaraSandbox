@@ -68,18 +68,26 @@ private:
 	UPROPERTY(EditAnywhere)
 	TArray<TEnumAsByte<EObjectTypeQuery>> OverlapQueryObjectTypes;
 
-	UPROPERTY(EditAnywhere)
-	AActor* StartConstraintActor = nullptr;
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	class AActor* StartConstraintActor = nullptr;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	class USceneComponent* StartConstraintComponent = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FName StartConstraintSocket;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	AActor* EndConstraintActor = nullptr;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	class USceneComponent* EndConstraintComponent = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FName EndConstraintSocket;
 
+private:
 	UPROPERTY(EditAnywhere)
 	int32 MaxIteration = 50;
 
