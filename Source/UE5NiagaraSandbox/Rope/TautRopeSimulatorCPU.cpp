@@ -957,10 +957,11 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintNew()
 
 						if (!bIntersectionExist)
 						{
-							PrevPositions.RemoveAt(Positions.Num() - 2);
-							Positions.RemoveAt(Positions.Num() - 2);
-							EdgeIdxOfPositions.RemoveAt(Positions.Num() - 2);
-							MovedFlagOfPositions.RemoveAt(Positions.Num() - 2);
+							int32 LastIdx = Positions.Num() - 2;
+							PrevPositions.RemoveAt(LastIdx);
+							Positions.RemoveAt(LastIdx);
+							EdgeIdxOfPositions.RemoveAt(LastIdx);
+							MovedFlagOfPositions.RemoveAt(LastIdx);
 
 							bExistAddedParticle = false;
 						}
