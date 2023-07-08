@@ -94,8 +94,8 @@ private:
 private:
 	void UpdateStartEndConstraint();
 	void UpdateRopeBlockers();
+	void SolveRopeBlockersCollisionConstraintOld();
 	void SolveRopeBlockersCollisionConstraint();
-	void SolveRopeBlockersCollisionConstraintNew();
 
 private:
 	TArray<FVector> Positions;
