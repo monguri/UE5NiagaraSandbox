@@ -690,20 +690,14 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			{
 				if (ParticleIdx == 0)
 				{
-					if (Positions[0] != PrevPositions[0]) // TODO:Toleranceを入れないでみる
-					{
-						bNeedCollisionPhase = true;
-					}
+					bNeedCollisionPhase = (Positions[0] != PrevPositions[0]); // TODO:Toleranceを入れないでみる
 
 					// 始点と終点は1フレームに一度しか動かさないので即Movedフラグを下げる
 					MovedFlagOfPositions[ParticleIdx] = false;
 				}
 				else if (ParticleIdx == (Positions.Num() - 1))
 				{
-					if (Positions[Positions.Num() - 1] != PrevPositions[Positions.Num() - 1]) // TODO:Toleranceを入れないでみる
-					{
-						bNeedCollisionPhase = true;
-					}
+					bNeedCollisionPhase = (Positions[Positions.Num() - 1] != PrevPositions[Positions.Num() - 1]); // TODO:Toleranceを入れないでみる
 
 					// 始点と終点は1フレームに一度しか動かさないので即Movedフラグを下げる
 					MovedFlagOfPositions[ParticleIdx] = false;
@@ -721,7 +715,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					// 動いてるのがStartPointであろうとEndPointであろうとStartPointPlane側を回転させて
 					// 最短交点を計算する
 
-					// エッジの直線に垂線を下ろした点 // TODO:エッジ移動を考えないので線分でなく直線で足を求めている
+					// エッジの直線に垂線を下ろした点をエッジを直線にして計算
 					const FVector& StartPointDropFoot = FMath::ClosestPointOnInfiniteLine(EdgeStart, EdgeEnd, StartPoint);
 					const FVector& EndPointDropFoot = FMath::ClosestPointOnInfiniteLine(EdgeStart, EdgeEnd, EndPoint);
 
@@ -730,15 +724,30 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					
 					// 最短になる交点は垂線の長さの比による線形補間で決まる
 					double Alpha = StartPointPerpLen / (StartPointPerpLen + EndPointPerpLen);
-					Positions[ParticleIdx] = FMath::Lerp(StartPointDropFoot, EndPointDropFoot, Alpha);
-					// TODO:エッジ移動を考えないので線分外に出たらログを出しておく
-					if (Alpha <= 0.0 || Alpha >= 1.0)
+					const FVector& ShortestPointOnInfiniteLine = FMath::Lerp(StartPointDropFoot, EndPointDropFoot, Alpha);
+					double EdgeLenSqr = FVector::DotProduct(EdgeEnd - EdgeStart, EdgeEnd - EdgeStart);
+
+					// エッジは線分なのでクランプする
+					bool bClamped = false;
+					if (FVector::DotProduct(ShortestPointOnInfiniteLine - EdgeStart, EdgeEnd - EdgeStart) > EdgeLenSqr)
 					{
-						UE_LOG(LogTemp, Log,  TEXT("Alpha = %lf. Shortest constraint generates overgoing edge."), Alpha);
+						Positions[ParticleIdx] = EdgeEnd;
+						bClamped = true;
+					}
+					else if (FVector::DotProduct(ShortestPointOnInfiniteLine - EdgeEnd, EdgeStart - EdgeEnd) > EdgeLenSqr)
+					{
+						Positions[ParticleIdx] = EdgeStart;
+						bClamped = true;
+					}
+					else
+					{
+						Positions[ParticleIdx] = ShortestPointOnInfiniteLine;
+						bClamped = false;
 					}
 
-					// TODO: エッジ移動は考えず、頂点追加も現状始点終点でないセグメントでは起こさない前提で、コリジョンフェイズに入れない
-					bNeedCollisionPhase = false;
+					// エッジの端にクランプされたとき、動いていたらCollisionPhaseへ。属すべきエッジの変化が起きうるので、エッジ移動、頂点削除、追加などの判定を行う。
+					bNeedCollisionPhase = bClamped && (Positions[ParticleIdx] != PrevPositions[ParticleIdx]); // TODO:Toleranceを入れないでみる
+
 					// 収束のため閾値つきで動いたかどうか判定
 					MovedFlagOfPositions[ParticleIdx] = ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared);
 				}
@@ -752,7 +761,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			FVector MovePosition = Positions[ParticleIdx];
 			if (bNeedCollisionPhase)
 			{
-				// TODO:実装
 				// 単に動いた時の前後セグメントでの頂点追加
 				// TODO:エッジ移動とエッジに沿った削除はあとで実装する
 				// TODO:現状、頂点追加は始点と終点のセグメント以外では考えない
@@ -801,11 +809,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
 						// Triangleの辺にエッジがある場合に交差を検出失敗する。
 						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
-#if 0
-						// TODO:TriVert0と1の間の点ではなく長さと向きを維持した延長線上の点にしている
-						PrevPositions[ParticleIdx] = TriVert2 + (NearestIntersectPoint - TriVert2).GetSafeNormal() * (TriVert0 - TriVert2).Size();
-#endif
-
 						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 						Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
 						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
@@ -963,11 +966,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
 						// Triangleの辺にエッジがある場合に交差を検出失敗する。
 						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
-#if 0
-						// TODO:TriVert0と1の間の点ではなく長さと向きを維持した延長線上の点にしている
-						PrevPositions[ParticleIdx] = TriVert0 + (NearestIntersectPoint - TriVert0).GetSafeNormal() * (TriVert2 - TriVert0).Size();
-#endif
-
 						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx);
 						Positions.Insert(NearestIntersectPoint, ParticleIdx);
 						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx);
@@ -1076,7 +1074,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				}
 				else
 				{
-					check(false);
+					// エッジ端に到達した場合
+					// 頂点周辺のエッジの状況を調査し、エッジ移動、頂点追加/削除の判定を行う
+					// TODO:今まで削除は始点と端点側のブロックでTriangleの3つのエッジとPrimitiveの交差判定でやってきたが本来はここでやるべき
 				}
 			}
 			else
