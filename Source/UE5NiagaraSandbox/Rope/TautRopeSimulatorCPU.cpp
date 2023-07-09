@@ -729,12 +729,12 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 					// エッジは線分なのでクランプする
 					bool bClamped = false;
-					if (FVector::DotProduct(ShortestPointOnInfiniteLine - EdgeStart, EdgeEnd - EdgeStart) > EdgeLenSqr)
+					if (FVector::DotProduct(ShortestPointOnInfiniteLine - EdgeStart, EdgeEnd - EdgeStart) > EdgeLenSqr) // TODO:Toleranceを入れないでみる
 					{
 						Positions[ParticleIdx] = EdgeEnd;
 						bClamped = true;
 					}
-					else if (FVector::DotProduct(ShortestPointOnInfiniteLine - EdgeEnd, EdgeStart - EdgeEnd) > EdgeLenSqr)
+					else if (FVector::DotProduct(ShortestPointOnInfiniteLine - EdgeEnd, EdgeStart - EdgeEnd) > EdgeLenSqr) // TODO:Toleranceを入れないでみる
 					{
 						Positions[ParticleIdx] = EdgeStart;
 						bClamped = true;
@@ -1077,6 +1077,42 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					// エッジ端に到達した場合
 					// 頂点周辺のエッジの状況を調査し、エッジ移動、頂点追加/削除の判定を行う
 					// TODO:今まで削除は始点と端点側のブロックでTriangleの3つのエッジとPrimitiveの交差判定でやってきたが本来はここでやるべき
+
+					// 頂点を中心としたTolerance半径の球と接触するエッジを収集する
+					TArray<int32> IntersectedEdgeIndices;
+					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+					{
+						const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+						const FVector& EdgeStart = Edge.Key;
+						const FVector& EdgeEnd = Edge.Value;
+
+						double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(Positions[ParticleIdx], EdgeStart, EdgeEnd);
+						if (EdgeDistanceSq < ToleranceSquared)
+						{
+							IntersectedEdgeIndices.Add(EdgeIdx);
+						}
+					}
+
+					if (IntersectedEdgeIndices.Num() == 1)
+					{
+						// 検出したエッジは現在所属していエッジであるはず
+						check(IntersectedEdgeIndices[0] == EdgeIdxOfPositions[ParticleIdx]);
+						// メッシュとしてエッジ端に他のエッジが全く接してないのは許容できない
+						check(false);
+					}
+					else if (IntersectedEdgeIndices.Num() > 1)
+					{
+						// エッジのペアを作る
+						TArray<TPair<int32, int32>> EdgePairs;
+						EdgePairs.SetNum(IntersectedEdgeIndices.Num() * (IntersectedEdgeIndices.Num() - 1) / 2); // n_C_2
+						for (int32 EdgeIdx = 0; EdgeIdx < IntersectedEdgeIndices.Num() - 1; EdgeIdx++)
+						{
+							for (int32 AnotherEdgeIdx = EdgeIdx + 1; AnotherEdgeIdx < IntersectedEdgeIndices.Num(); AnotherEdgeIdx++)
+							{
+								EdgePairs.Add(TPair<int32, int32>(EdgeIdx, AnotherEdgeIdx));
+							}
+						}
+					}
 				}
 			}
 			else
