@@ -1184,13 +1184,13 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							// Valueの方が交点から遠い方とする
 							if ((EdgeA.Key - Positions[ParticleIdx]).SizeSquared() > (EdgeA.Value - Positions[ParticleIdx]).SizeSquared())
 							{
-								const FVector& SwapTmp = EdgeA.Value;
+								FVector SwapTmp = EdgeA.Value;
 								EdgeA.Value = EdgeA.Key;
 								EdgeA.Key = SwapTmp;
 							}
 							if ((EdgeB.Key - Positions[ParticleIdx]).SizeSquared() > (EdgeB.Value - Positions[ParticleIdx]).SizeSquared())
 							{
-								const FVector& SwapTmp = EdgeB.Value;
+								FVector SwapTmp = EdgeB.Value;
 								EdgeB.Value = EdgeB.Key;
 								EdgeB.Key = SwapTmp;
 							}
