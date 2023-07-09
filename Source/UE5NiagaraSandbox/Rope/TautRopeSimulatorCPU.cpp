@@ -1192,6 +1192,39 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							else
 							{
 								const FVector& TwoEdgePlaneNormal = FVector::CrossProduct(EdgeADir, EdgeBDir);
+								const FVector& EdgeARightDir = FVector::CrossProduct(EdgeADir, TwoEdgePlaneNormal);
+								const FVector& EdgeBRightDir = FVector::CrossProduct(TwoEdgePlaneNormal, EdgeBDir);
+
+								const FVector& ParticleNormalProjected = FVector::VectorPlaneProject(ParticleNormal, TwoEdgePlaneNormal);
+
+								const FVector& CrossProductWithEdgeA = FVector::CrossProduct(EdgeADir, ParticleNormalProjected);
+								const FVector& CrossProductWithEdgeB = FVector::CrossProduct(ParticleNormalProjected, EdgeBDir);
+
+								double DotProductA = FVector::DotProduct(CrossProductWithEdgeA, TwoEdgePlaneNormal);
+								double DotProductB = FVector::DotProduct(CrossProductWithEdgeB, TwoEdgePlaneNormal);
+
+								if (DotProductA > 0)
+								{
+									if (DotProductB > 0)
+									{
+										// Inner Corner
+									}
+									else // DotProductB <= 0
+									{
+										// SideB
+									}
+								}
+								else // DotProductA <= 0
+								{
+									if (DotProductB > 0)
+									{
+										// SideA
+									}
+									else // DotProductB <= 0
+									{
+										// Unstable Corner
+									}
+								}
 							}
 						}
 					}
