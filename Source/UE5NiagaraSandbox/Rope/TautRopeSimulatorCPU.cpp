@@ -1152,6 +1152,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							ParticleNormal = (Positions[ParticleIdx] - DropFoot).GetSafeNormal();
 						}
 
+						// TODO:後で判定必要？
+						//check(ParticleNormal != FVector::ZAxisVector);
+
 						// エッジペアごとに頂点との関係性テーブルを作成
 						for (const TPair<int32, int32>& EdgePair : EdgePairs)
 						{
