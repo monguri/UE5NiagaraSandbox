@@ -1119,10 +1119,10 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						// TODO:頂点間がToleranceより近い場合は頂点をまとめるべきなのでこのTolerance処理は必要ない
 						const FVector& PreSegmentDir = (Positions[ParticleIdx] - Positions[ParticleIdx - 1]).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると内積判定がおかしくなるのでとりあえず
 						const FVector& PostSegmentDir = (Positions[ParticleIdx + 1] - Positions[ParticleIdx]).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると内積判定がおかしくなるのでとりあえず
-						double DotProduct = FVector::DotProduct(PreSegmentDir, PostSegmentDir);
+						double TwoSegmentDotProduct = FVector::DotProduct(PreSegmentDir, PostSegmentDir);
 
 						FVector ParticleNormal = FVector::ZAxisVector;
-						if (DotProduct > 1.0f - Tolerance) // 前セグメントと次セグメントが平行 // TODO:内積に同じTolerance使うのはよくないかも。次元が違うし
+						if (TwoSegmentDotProduct > 1.0 - Tolerance) // 前セグメントと次セグメントが平行 // TODO:内積に同じTolerance使うのはよくないかも。次元が違うし
 						{
 							// 前セグメントと平行でないセグメントを探してそれを採用
 							// TODO:後ろ方向にしか探してないので偏りがある
@@ -1140,7 +1140,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 								}
 							}
 						}
-						else if (-DotProduct > 1.0f - Tolerance) // 前セグメントと次セグメントが180度逆。
+						else if (-TwoSegmentDotProduct > 1.0 - Tolerance) // 前セグメントと次セグメントが180度逆。
 						{
 							
 							ParticleNormal = PreSegmentDir;
@@ -1152,6 +1152,46 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							ParticleNormal = (Positions[ParticleIdx] - DropFoot).GetSafeNormal();
 						}
 
+						// エッジペアごとに頂点との関係性テーブルを作成
+						for (const TPair<int32, int32>& EdgePair : EdgePairs)
+						{
+							int32 EdgeIdxA = EdgePair.Key;
+							int32 EdgeIdxB = EdgePair.Value;
+
+							TPair<FVector, FVector> EdgeA = RopeBlockerTriMeshEdgeArray[EdgeIdxA];
+							TPair<FVector, FVector> EdgeB = RopeBlockerTriMeshEdgeArray[EdgeIdxB];
+
+							// エッジは交点（ここでは頂点が交点のTolerance範囲の近傍んあるとして頂点で代用）から伸びる方向を前方向としておく
+							// Valueの方が交点から遠い方とする
+							if ((EdgeA.Key - Positions[ParticleIdx]).SizeSquared() > (EdgeA.Value - Positions[ParticleIdx]).SizeSquared())
+							{
+								const FVector& SwapTmp = EdgeA.Value;
+								EdgeA.Value = EdgeA.Key;
+								EdgeA.Key = SwapTmp;
+							}
+							if ((EdgeB.Key - Positions[ParticleIdx]).SizeSquared() > (EdgeB.Value - Positions[ParticleIdx]).SizeSquared())
+							{
+								const FVector& SwapTmp = EdgeB.Value;
+								EdgeB.Value = EdgeB.Key;
+								EdgeB.Key = SwapTmp;
+							}
+
+							// TODO:頂点間がToleranceより近い場合は頂点をまとめるべきなのでこのTolerance処理は必要ない
+							const FVector& EdgeADir = (EdgeA.Value - EdgeA.Key).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると外積判定がおかしくなるのでとりあえず
+							const FVector& EdgeBDir = (EdgeB.Value - EdgeB.Key).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると外積判定がおかしくなるのでとりあえず
+
+							double TwoEdgeDotProduct = FVector::DotProduct(EdgeADir, EdgeBDir);
+							if (TwoEdgeDotProduct > 1.0 - Tolerance) // エッジが180度開いている
+							{
+							}
+							else if (-TwoEdgeDotProduct > 1.0 - Tolerance) // エッジが0度。閉じたくさび。
+							{
+							}
+							else
+							{
+								const FVector& TwoEdgePlaneNormal = FVector::CrossProduct(EdgeADir, EdgeBDir);
+							}
+						}
 					}
 				}
 			}
