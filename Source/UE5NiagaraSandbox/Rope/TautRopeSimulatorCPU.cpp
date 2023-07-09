@@ -1122,7 +1122,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						double TwoSegmentDotProduct = FVector::DotProduct(PreSegmentDir, PostSegmentDir);
 
 						FVector ParticleNormal = FVector::ZAxisVector;
-						if (TwoSegmentDotProduct > 1.0 - Tolerance) // 前セグメントと次セグメントが平行 // TODO:内積に同じTolerance使うのはよくないかも。次元が違うし
+						if (FVector::Coincident(PreSegmentDir, PostSegmentDir)) //TODO:ToleranceはFVector::Parallelのデフォルト任せ
 						{
 							// 前セグメントと平行でないセグメントを探してそれを採用
 							// TODO:後ろ方向にしか探してないので偏りがある
@@ -1140,7 +1140,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 								}
 							}
 						}
-						else if (-TwoSegmentDotProduct > 1.0 - Tolerance) // 前セグメントと次セグメントが180度逆。
+						else if (FVector::Coincident(-PreSegmentDir, PostSegmentDir)) //TODO:ToleranceはFVector::Parallelのデフォルト任せ
 						{
 							
 							ParticleNormal = PreSegmentDir;
@@ -1183,11 +1183,10 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							const FVector& EdgeADir = (EdgeA.Value - EdgeA.Key).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると外積判定がおかしくなるのでとりあえず
 							const FVector& EdgeBDir = (EdgeB.Value - EdgeB.Key).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると外積判定がおかしくなるのでとりあえず
 
-							double TwoEdgeDotProduct = FVector::DotProduct(EdgeADir, EdgeBDir);
-							if (TwoEdgeDotProduct > 1.0 - Tolerance) // エッジが180度開いている
+							if (FVector::Coincident(EdgeADir, EdgeBDir)) // エッジが0度。閉じたくさび。//TODO:ToleranceはFVector::Parallelのデフォルト任せ
 							{
 							}
-							else if (-TwoEdgeDotProduct > 1.0 - Tolerance) // エッジが0度。閉じたくさび。
+							else if (FVector::Coincident(-EdgeADir, EdgeBDir)) // エッジが180度。//TODO:ToleranceはFVector::Parallelのデフォルト任せ
 							{
 							}
 							else
