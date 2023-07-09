@@ -1106,8 +1106,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						TArray<TPair<int32, int32>> EdgePairs;
 						EdgePairs.SetNum(IntersectedEdgeIndices.Num() * (IntersectedEdgeIndices.Num() - 1) / 2); // n_C_2
 
-						int32 PairIdx = 0;
-						for (int32 EdgeIdx = 0; EdgeIdx < IntersectedEdgeIndices.Num() - 1; EdgeIdx++)
+						for (int32 EdgeIdx = 0, PairIdx = 0; EdgeIdx < IntersectedEdgeIndices.Num() - 1; EdgeIdx++)
 						{
 							for (int32 AnotherEdgeIdx = EdgeIdx + 1; AnotherEdgeIdx < IntersectedEdgeIndices.Num(); AnotherEdgeIdx++)
 							{
@@ -1152,12 +1151,29 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							ParticleNormal = (Positions[ParticleIdx] - DropFoot).GetSafeNormal();
 						}
 
+						enum class CornerType : uint8
+						{
+							InnerCorner = 0,
+							UnstableCorner,
+							SideEdge,
+							OuterCorner,
+						};
+
+						// エッジペアごとのコーナータイプ情報
+						TArray<CornerType> CornerTypes;
+						CornerTypes.SetNum(EdgePairs.Num());
+
+						// エッジペアごとのコーナータイプ情報に付加するエッジインデックス情報
+						TArray<int32> CornerEdgeIdxInfos;
+						CornerEdgeIdxInfos.SetNum(EdgePairs.Num());
+
 						// TODO:後で判定必要？
 						//check(ParticleNormal != FVector::ZAxisVector);
 
 						// エッジペアごとに頂点との関係性テーブルを作成
-						for (const TPair<int32, int32>& EdgePair : EdgePairs)
+						for (int32 PairIdx = 0; PairIdx < EdgePairs.Num(); PairIdx++)
 						{
+							const TPair<int32, int32>& EdgePair = EdgePairs[PairIdx];
 							int32 EdgeIdxA = EdgePair.Key;
 							int32 EdgeIdxB = EdgePair.Value;
 
@@ -1182,12 +1198,40 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							// TODO:頂点間がToleranceより近い場合は頂点をまとめるべきなのでこのTolerance処理は必要ない
 							const FVector& EdgeADir = (EdgeA.Value - EdgeA.Key).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると外積判定がおかしくなるのでとりあえず
 							const FVector& EdgeBDir = (EdgeB.Value - EdgeB.Key).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると外積判定がおかしくなるのでとりあえず
+							const FVector& Movement = Positions[ParticleIdx] - PrevPositions[ParticleIdx];
 
 							if (FVector::Coincident(EdgeADir, EdgeBDir)) // エッジが0度。閉じたくさび。//TODO:ToleranceはFVector::Parallelのデフォルト任せ
 							{
+								CornerTypes[PairIdx] = CornerType::InnerCorner;
+								// TODO:Stableの場合、所属エッジがイテレーションごとに入れ替わる可能性があり、不安定になりそうだが？
+
+								if (FVector::DotProduct(Movement, EdgeADir) > FVector::DotProduct(Movement, EdgeBDir))
+								{
+									// MoveAlongA
+									CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+								}
+								else
+								{
+									// MoveAlongB
+									CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+								}
 							}
 							else if (FVector::Coincident(-EdgeADir, EdgeBDir)) // エッジが180度。//TODO:ToleranceはFVector::Parallelのデフォルト任せ
 							{
+								// InnerCornerの別のエッジがあったときにそちらを優先したいのでInnerCornerでなくUnstableCornerにしておく
+								CornerTypes[PairIdx] = CornerType::UnstableCorner;
+
+								// TODO:実装が冗長
+								if (FVector::DotProduct(Movement, EdgeADir) > FVector::DotProduct(Movement, EdgeBDir))
+								{
+									// MoveAlongA
+									CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+								}
+								else
+								{
+									// MoveAlongB
+									CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+								}
 							}
 							else
 							{
@@ -1207,24 +1251,56 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 								{
 									if (DotProductB > 0)
 									{
-										// Inner Corner
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+										// TODO:Stableの場合、所属エッジがイテレーションごとに入れ替わる可能性があり、不安定になりそうだが？
+
+										// TODO:実装が冗長
+										if (FVector::DotProduct(Movement, EdgeADir) > FVector::DotProduct(Movement, EdgeBDir))
+										{
+											// MoveAlongA
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else
+										{
+											// MoveAlongB
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
 									}
 									else // DotProductB <= 0
 									{
-										// SideB
+										CornerTypes[PairIdx] = CornerType::SideEdge;
+										// IgnoreB
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
 									}
 								}
 								else // DotProductA <= 0
 								{
 									if (DotProductB > 0)
 									{
-										// SideA
+										CornerTypes[PairIdx] = CornerType::SideEdge;
+										// IgnoreA
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
 									}
 									else // DotProductB <= 0
 									{
-										// Unstable Corner
+										CornerTypes[PairIdx] = CornerType::UnstableCorner;
+										// TODO:これはMovementPhaseでの動きから判定が必要
+
+										// TODO:実装が冗長
+										if (FVector::DotProduct(Movement, EdgeADir) > FVector::DotProduct(Movement, EdgeBDir))
+										{
+											// MoveAlongA
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else
+										{
+											// MoveAlongB
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
 									}
 								}
+								//TODO: 表裏2回で貫通するときの1ケースであるOuterCornerを判定できてない
+								//TODO: OuterCornerのくさびから交点に収束して2頂点をマージするケースも実装してない
 							}
 						}
 					}
