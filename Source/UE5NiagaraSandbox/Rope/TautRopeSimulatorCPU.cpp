@@ -1115,6 +1115,43 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 								PairIdx++;
 							}
 						}
+
+						// TODO:頂点間がToleranceより近い場合は頂点をまとめるべきなのでこのTolerance処理は必要ない
+						const FVector& PreSegmentDir = (Positions[ParticleIdx] - Positions[ParticleIdx - 1]).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると内積判定がおかしくなるのでとりあえず
+						const FVector& PostSegmentDir = (Positions[ParticleIdx + 1] - Positions[ParticleIdx]).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると内積判定がおかしくなるのでとりあえず
+						double DotProduct = FVector::DotProduct(PreSegmentDir, PostSegmentDir);
+
+						FVector ParticleNormal = FVector::ZAxisVector;
+						if (DotProduct > 1.0f - Tolerance) // 前セグメントと次セグメントが平行 // TODO:内積に同じTolerance使うのはよくないかも。次元が違うし
+						{
+							// 前セグメントと平行でないセグメントを探してそれを採用
+							// TODO:後ろ方向にしか探してないので偏りがある
+							for (int32 PostParticleIdx = ParticleIdx + 1; PostParticleIdx < Positions.Num(); PostParticleIdx++)
+							{
+								// TODO:頂点間がToleranceより近い場合は頂点をまとめるべきなのでこのTolerance処理は必要ない
+								const FVector& NextDir = (Positions[PostParticleIdx] - Positions[ParticleIdx]).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると内積判定がおかしくなるのでとりあえず
+								double NextDotProduct = FVector::DotProduct(PreSegmentDir, NextDir);
+								if (FMath::Abs(NextDotProduct) < 1.0f - Tolerance)
+								{
+									// 頂点位置から、前頂点と後頂点を通る直線に下ろした垂線の足
+									const FVector& DropFoot = FMath::ClosestPointOnInfiniteLine(Positions[ParticleIdx - 1], Positions[PostParticleIdx], Positions[ParticleIdx]);
+									ParticleNormal = (Positions[ParticleIdx] - DropFoot).GetSafeNormal();
+									break;
+								}
+							}
+						}
+						else if (-DotProduct > 1.0f - Tolerance) // 前セグメントと次セグメントが180度逆。
+						{
+							
+							ParticleNormal = PreSegmentDir;
+						}
+						else
+						{
+							// 頂点位置から、前頂点と後頂点を通る直線に下ろした垂線の足
+							const FVector& DropFoot = FMath::ClosestPointOnInfiniteLine(Positions[ParticleIdx - 1], Positions[ParticleIdx + 1], Positions[ParticleIdx]);
+							ParticleNormal = (Positions[ParticleIdx] - DropFoot).GetSafeNormal();
+						}
+
 					}
 				}
 			}
