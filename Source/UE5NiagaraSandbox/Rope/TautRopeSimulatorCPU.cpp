@@ -1102,7 +1102,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					}
 					else if (IntersectedEdgeIndices.Num() > 1)
 					{
-						// エッジのペアを作る
+						// エッジのペア配列を作る
 						TArray<TPair<int32, int32>> EdgePairs;
 						EdgePairs.SetNum(IntersectedEdgeIndices.Num() * (IntersectedEdgeIndices.Num() - 1) / 2); // n_C_2
 
@@ -1111,7 +1111,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						{
 							for (int32 AnotherEdgeIdx = EdgeIdx + 1; AnotherEdgeIdx < IntersectedEdgeIndices.Num(); AnotherEdgeIdx++)
 							{
-								EdgePairs[PairIdx] = TPair<int32, int32>(EdgeIdx, AnotherEdgeIdx);
+								EdgePairs[PairIdx] = TPair<int32, int32>(IntersectedEdgeIndices[EdgeIdx], IntersectedEdgeIndices[AnotherEdgeIdx]);
 								PairIdx++;
 							}
 						}
