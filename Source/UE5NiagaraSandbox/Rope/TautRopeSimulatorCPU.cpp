@@ -1105,11 +1105,14 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						// エッジのペアを作る
 						TArray<TPair<int32, int32>> EdgePairs;
 						EdgePairs.SetNum(IntersectedEdgeIndices.Num() * (IntersectedEdgeIndices.Num() - 1) / 2); // n_C_2
+
+						int32 PairIdx = 0;
 						for (int32 EdgeIdx = 0; EdgeIdx < IntersectedEdgeIndices.Num() - 1; EdgeIdx++)
 						{
 							for (int32 AnotherEdgeIdx = EdgeIdx + 1; AnotherEdgeIdx < IntersectedEdgeIndices.Num(); AnotherEdgeIdx++)
 							{
-								EdgePairs.Add(TPair<int32, int32>(EdgeIdx, AnotherEdgeIdx));
+								EdgePairs[PairIdx] = TPair<int32, int32>(EdgeIdx, AnotherEdgeIdx);
+								PairIdx++;
 							}
 						}
 					}
