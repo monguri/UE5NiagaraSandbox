@@ -664,6 +664,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			const FVector& LineStartWS = GetActorTransform().TransformPosition(Edge.Key);
 			const FVector& LineEndWS = GetActorTransform().TransformPosition(Edge.Value);
 			DrawDebugLine(GetWorld(), LineStartWS, LineEndWS, FLinearColor::Red.ToFColorSRGB());
+			DrawDebugString(GetWorld(), (LineStartWS + LineEndWS) * 0.5, FString::FromInt(EdgeIdx), nullptr, FLinearColor::Red.ToFColorSRGB());
 		}
 	}
 
