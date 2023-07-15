@@ -10,6 +10,12 @@
 #include "Async/ParallelFor.h"
 #include "Chaos/TriangleMeshImplicitObject.h"
 #include "DrawDebugHelpers.h"
+#if WITH_EDITOR
+// DrawDebugString()のためにAHUD::DrawDebugTextList()を自前で呼び出すため
+#include "Editor.h"
+#include "GameFramework/HUD.h"
+#include "GameFramework/PlayerController.h"
+#endif
 
 void ATautRopeSimulatorCPU::BeginPlay()
 {
@@ -71,6 +77,22 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 	NiagaraComponent->SetNiagaraVariableInt("NumSegments", NumSegments);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ParentPositions"), ParentPositions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ChildPositions"), ChildPositions);
+
+	// SIEだとAHUD::DrawDebugTextList()が呼ばれないためにDrawDebugString()で登録した文字列が描画されないので自前で呼び出し
+	// DrawDebugHelpers.cppのDrawDebugString()およびHUD.cppを参考にしている
+#if WITH_EDITOR
+	if (GEditor->bIsSimulatingInEditor)
+	{
+		for( FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator )
+		{
+			APlayerController* PlayerController = Iterator->Get();
+			if (PlayerController && PlayerController->MyHUD && PlayerController->Player)
+			{
+				PlayerController->MyHUD->DrawDebugTextList();
+			}
+		}
+	}
+#endif
 }
 
 void ATautRopeSimulatorCPU::UpdateStartEndConstraint()
