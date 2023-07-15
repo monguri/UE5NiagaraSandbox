@@ -13,12 +13,5 @@ public class UE5NiagaraSandbox : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] {
 			"Niagara", "Chaos"
 		});
-
-		if (Target.Type == TargetType.Editor)
-        {
-            PrivateDependencyModuleNames.AddRange(new string[] {
-				"UnrealEd"
-			});
-        }
 	}
 }
