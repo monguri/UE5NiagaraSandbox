@@ -108,6 +108,7 @@ private:
 	//TODO: UPROPERTYをつけるとUHTが通らないのであきらめる
 	TArray<TPair<FVector, FVector>> RopeBlockerTriMeshEdgeArray;
 	TArray<int32> EdgeIdxOfPositions;
+	TArray<FVector> EdgeIdxDebugDrawPositions;
 	TArray<class UPrimitiveComponent*> OverlapPrimitives; // UPrimitiveComponent::LineTraceComponent()がconstでないのでしょうがなくconstをつけてない
 
 	TArray<bool> MovedFlagOfPositions;

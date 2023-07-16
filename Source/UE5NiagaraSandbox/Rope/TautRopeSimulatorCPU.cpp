@@ -68,9 +68,24 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 	TArray<FVector> TmpChildPositions(&Positions.GetData()[1], NumSegments);
 	ParentPositions = MoveTemp(TmpParentPositions);
 	ChildPositions = MoveTemp(TmpChildPositions);
-	NiagaraComponent->SetNiagaraVariableInt("NumSegments", NumSegments);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ParentPositions"), ParentPositions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ChildPositions"), ChildPositions);
+
+	// TODO:bDrawCollisionEdgeによるデバッグ表示切替
+	if (bDrawCollisionEdge)
+	{
+		EdgeIdxDebugDrawPositions.Reset();
+		for (const TPair<FVector, FVector>& Pair : RopeBlockerTriMeshEdgeArray)
+		{
+			EdgeIdxDebugDrawPositions.Add((Pair.Key + Pair.Value) * 0.5);
+		}
+		UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("EdgeIdxDebugDrawPositions"), EdgeIdxDebugDrawPositions);
+	}
+	else
+	{
+		// 空配列を渡すことでエッジのデバッグ描画用のパーティクルを0にする
+		UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("EdgeIdxDebugDrawPositions"), TArray<FVector>());
+	}
 }
 
 void ATautRopeSimulatorCPU::UpdateStartEndConstraint()
@@ -656,6 +671,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 {
 	using namespace NiagaraSandbox::RopeSimulator;
 
+	// TODO:これもいっそNiagaraで描画するか？
 	if (bDrawCollisionEdge)
 	{
 		for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
@@ -664,8 +680,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			const FVector& LineStartWS = GetActorTransform().TransformPosition(Edge.Key);
 			const FVector& LineEndWS = GetActorTransform().TransformPosition(Edge.Value);
 			DrawDebugLine(GetWorld(), LineStartWS, LineEndWS, FLinearColor::Red.ToFColorSRGB());
-			//TODO: PIEでしか描画されない。SIEで文字列描画する方法は簡単なものが見つからない
-			DrawDebugString(GetWorld(), (LineStartWS + LineEndWS) * 0.5, FString::FromInt(EdgeIdx), nullptr, FLinearColor::Red.ToFColorSRGB());
 		}
 	}
 
