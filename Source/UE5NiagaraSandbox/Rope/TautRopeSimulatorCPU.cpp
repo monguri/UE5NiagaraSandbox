@@ -7,8 +7,8 @@
 #include "NiagaraSystem.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraDataInterfaceArrayFunctionLibrary.h"
+#include "Async/ParallelFor.h"
 #include "Chaos/TriangleMeshImplicitObject.h"
-#include "Components/ModelComponent.h"
 #include "DrawDebugHelpers.h"
 
 void ATautRopeSimulatorCPU::BeginPlay()
@@ -98,17 +98,14 @@ void ATautRopeSimulatorCPU::UpdateStartEndConstraint()
 void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 {
 	TArray<FOverlapResult> Overlaps;
-	// TODO:BrushアクタだとコリジョンはModelComponentが内部で生成されObjectType指定はできないので
-	// FCollisionObjectQueryParams::InitType::AllObjectsで拾い上げた上でObjectTypeとModelComponentでフィルタする
-	//FCollisionObjectQueryParams ObjectParams(OverlapQueryObjectTypes);
-	FCollisionObjectQueryParams ObjectParams(FCollisionObjectQueryParams::InitType::AllObjects);
+	FCollisionObjectQueryParams ObjectParams(OverlapQueryObjectTypes);
 	if (!ObjectParams.IsValid())
 	{
 		return;
 	}
 
 	// OverlapクエリはSimpleコリジョンへのクエリで十分と判断
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(UpdateRopeBlockers), true);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(UpdateRopeBlockers), false);
 
 	GetWorld()->OverlapMultiByObjectType(Overlaps, GetActorLocation() + OverlapQueryBox.GetCenter(), GetActorQuat(), ObjectParams, FCollisionShape::MakeBox(OverlapQueryBox.GetExtent()), Params);
 
@@ -121,20 +118,6 @@ void ATautRopeSimulatorCPU::UpdateRopeBlockers()
 	{
 		UPrimitiveComponent* Primitive = Overlap.GetComponent();
 		if (Primitive == nullptr || Primitive->GetBodyInstance() == nullptr || Primitive->GetBodyInstance()->GetBodySetup() == nullptr)
-		{
-			continue;
-		}
-
-		bool bObjectTypeMatched = false;
-		for (EObjectTypeQuery ObjectType : OverlapQueryObjectTypes)
-		{
-			if (Primitive->GetBodyInstance()->GetObjectType() == UEngineTypes::ConvertToCollisionChannel(ObjectType))
-			{
-				bObjectTypeMatched = true;
-			}
-		}
-
-		if (!bObjectTypeMatched && !Primitive->IsA(UModelComponent::StaticClass()))
 		{
 			continue;
 		}
