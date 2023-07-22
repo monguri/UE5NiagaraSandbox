@@ -1259,7 +1259,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							}
 							else
 							{
-								const FVector& TwoEdgePlaneNormal = FVector::CrossProduct(EdgeADir, EdgeBDir);
+								const FVector& TwoEdgePlaneNormal = FVector::CrossProduct(EdgeADir, EdgeBDir).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると外積判定がおかしくなるのでとりあえず;
 
 								// 前セグメントと後セグメントが、エッジAとエッジBがなす平面を、両方表あるいは裏から
 								// 貫通しているか、表裏逆方向に貫通しているかを判定する
