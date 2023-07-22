@@ -806,14 +806,18 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
 						if (bIntersecting)
 						{
-							// 元の線分と最も近いエッジを採用
-							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
-							if (EdgeDistanceSq < NearestEdgeDistanceSq)
+							// 既存の動いてない方の頂点と近すぎるものは追加しない。複数エッジの交点と衝突した場合に複数頂点追加しうるので
+							if ((IntersectPoint - TriVert2).SizeSquared() > ToleranceSquared)
 							{
-								// 等距離なら最も若いインデックスを採用する
-								NearestEdgeDistanceSq = EdgeDistanceSq;
-								NearestIntersectPoint = IntersectPoint;
-								NearestEdgeIdx = EdgeIdx;
+								// 元の線分と最も近いエッジを採用
+								double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
+								if (EdgeDistanceSq < NearestEdgeDistanceSq)
+								{
+									// 等距離なら最も若いインデックスを採用する
+									NearestEdgeDistanceSq = EdgeDistanceSq;
+									NearestIntersectPoint = IntersectPoint;
+									NearestEdgeIdx = EdgeIdx;
+								}
 							}
 						}
 					}
@@ -964,14 +968,18 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
 						if (bIntersecting)
 						{
-							// 元の線分と最も近いエッジを採用
-							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
-							if (EdgeDistanceSq < NearestEdgeDistanceSq)
+							// 既存の動いてない方の頂点と近すぎるものは追加しない。複数エッジの交点と衝突した場合に複数頂点追加しうるので
+							if ((IntersectPoint - TriVert0).SizeSquared() > ToleranceSquared)
 							{
-								// 等距離なら最も若いインデックスを採用する
-								NearestEdgeDistanceSq = EdgeDistanceSq;
-								NearestIntersectPoint = IntersectPoint;
-								NearestEdgeIdx = EdgeIdx;
+								// 元の線分と最も近いエッジを採用
+								double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
+								if (EdgeDistanceSq < NearestEdgeDistanceSq)
+								{
+									// 等距離なら最も若いインデックスを採用する
+									NearestEdgeDistanceSq = EdgeDistanceSq;
+									NearestIntersectPoint = IntersectPoint;
+									NearestEdgeIdx = EdgeIdx;
+								}
 							}
 						}
 					}
