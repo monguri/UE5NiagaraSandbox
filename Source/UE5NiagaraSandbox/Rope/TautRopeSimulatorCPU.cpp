@@ -1341,7 +1341,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 									// 前のセグメントがエッジAとエッジBのなす平面の4領域のどれを通るかを判定する内積
 									double PreSegmentDotProductA = FVector::DotProduct(PreSegmentCrossProductWithEdgeA, TwoEdgePlaneNormal);
-									double PreSegmentDotProductB = FVector::DotProduct(PreSegmentCrossProductWithEdgeA, TwoEdgePlaneNormal);
+									double PreSegmentDotProductB = FVector::DotProduct(PreSegmentCrossProductWithEdgeB, TwoEdgePlaneNormal);
 
 									const FVector& PostSegmentProjected = FVector::VectorPlaneProject(PostSegmentDir, TwoEdgePlaneNormal);
 
@@ -1350,7 +1350,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 									// 前のセグメントがエッジAとエッジBのなす平面の4領域のどれを通るかを判定する内積
 									double PostSegmentDotProductA = FVector::DotProduct(PostSegmentCrossProductWithEdgeA, TwoEdgePlaneNormal);
-									double PostSegmentDotProductB = FVector::DotProduct(PostSegmentCrossProductWithEdgeA, TwoEdgePlaneNormal);
+									double PostSegmentDotProductB = FVector::DotProduct(PostSegmentCrossProductWithEdgeB, TwoEdgePlaneNormal);
 
 									if (PreSegmentDotProductA > 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB > 0)
 									{
