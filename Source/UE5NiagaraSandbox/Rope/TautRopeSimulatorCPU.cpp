@@ -1145,7 +1145,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						double TwoSegmentDotProduct = FVector::DotProduct(PreSegmentDir, PostSegmentDir);
 
 						FVector ParticleNormal = FVector::ZAxisVector;
-						if (FVector::Coincident(PreSegmentDir, PostSegmentDir)) //TODO:ToleranceはFVector::Parallelのデフォルト任せ
+						if (FVector::Coincident(PreSegmentDir, PostSegmentDir)) //TODO:ToleranceはFVector::Coincidentのデフォルト任せ
 						{
 							// 前セグメントと平行でないセグメントを探してそれを採用
 							// TODO:後ろ方向にしか探してないので偏りがある
@@ -1260,71 +1260,132 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							else
 							{
 								const FVector& TwoEdgePlaneNormal = FVector::CrossProduct(EdgeADir, EdgeBDir);
-								const FVector& EdgeARightDir = FVector::CrossProduct(EdgeADir, TwoEdgePlaneNormal);
-								const FVector& EdgeBRightDir = FVector::CrossProduct(TwoEdgePlaneNormal, EdgeBDir);
 
-								const FVector& ParticleNormalProjected = FVector::VectorPlaneProject(ParticleNormal, TwoEdgePlaneNormal);
-
-								const FVector& CrossProductWithEdgeA = FVector::CrossProduct(EdgeADir, ParticleNormalProjected);
-								const FVector& CrossProductWithEdgeB = FVector::CrossProduct(ParticleNormalProjected, EdgeBDir);
-
-								double DotProductA = FVector::DotProduct(CrossProductWithEdgeA, TwoEdgePlaneNormal);
-								double DotProductB = FVector::DotProduct(CrossProductWithEdgeB, TwoEdgePlaneNormal);
-
-								if (DotProductA > 0)
+								// 前セグメントと後セグメントが、エッジAとエッジBがなす平面を、両方表あるいは裏から
+								// 貫通しているか、表裏逆方向に貫通しているかを判定する
+								double DotProductPre = FVector::DotProduct(PreSegmentDir, TwoEdgePlaneNormal);
+								double DotProductPost = FVector::DotProduct(PostSegmentDir, TwoEdgePlaneNormal);
+								if ((DotProductPre > 0 && DotProductPost > 0)
+									|| (DotProductPre < 0 && DotProductPost < 0)) // 両方表あるいは両方裏から貫通している
 								{
-									if (DotProductB > 0)
-									{
-										CornerTypes[PairIdx] = CornerType::InnerCorner;
-										// TODO:Stableの場合、所属エッジがイテレーションごとに入れ替わる可能性があり、不安定になりそうだが？
+									const FVector& ParticleNormalProjected = FVector::VectorPlaneProject(ParticleNormal, TwoEdgePlaneNormal);
 
-										// TODO:実装が冗長
-										if (FVector::DotProduct(Movement, EdgeADir) > FVector::DotProduct(Movement, EdgeBDir))
+									const FVector& CrossProductWithEdgeA = FVector::CrossProduct(EdgeADir, ParticleNormalProjected);
+									const FVector& CrossProductWithEdgeB = FVector::CrossProduct(ParticleNormalProjected, EdgeBDir);
+
+									// 頂点での折れ曲がりの法線がエッジAとエッジBの区分する4領域のどちら方向にあるかをチェックする
+									double DotProductA = FVector::DotProduct(CrossProductWithEdgeA, TwoEdgePlaneNormal);
+									double DotProductB = FVector::DotProduct(CrossProductWithEdgeB, TwoEdgePlaneNormal);
+
+									if (DotProductA > 0)
+									{
+										if (DotProductB > 0)
 										{
-											// MoveAlongA
-											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+											CornerTypes[PairIdx] = CornerType::InnerCorner;
+											// TODO:Stableの場合、所属エッジがイテレーションごとに入れ替わる可能性があり、不安定になりそうだが？
+
+											// TODO:実装が冗長
+											if (FVector::DotProduct(Movement, EdgeADir) > FVector::DotProduct(Movement, EdgeBDir))
+											{
+												// MoveAlongA
+												CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+											}
+											else
+											{
+												// MoveAlongB
+												CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+											}
 										}
-										else
+										else // DotProductB <= 0
 										{
-											// MoveAlongB
+											CornerTypes[PairIdx] = CornerType::SideEdge;
+											// IgnoreB
 											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
 										}
 									}
-									else // DotProductB <= 0
+									else // DotProductA <= 0
 									{
-										CornerTypes[PairIdx] = CornerType::SideEdge;
-										// IgnoreB
-										CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										if (DotProductB > 0)
+										{
+											CornerTypes[PairIdx] = CornerType::SideEdge;
+											// IgnoreA
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else // DotProductB <= 0
+										{
+											CornerTypes[PairIdx] = CornerType::UnstableCorner;
+											// TODO:これはMovementPhaseでの動きから判定が必要
+
+											// TODO:実装が冗長
+											if (FVector::DotProduct(Movement, EdgeADir) > FVector::DotProduct(Movement, EdgeBDir))
+											{
+												// MoveAlongA
+												CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+											}
+											else
+											{
+												// MoveAlongB
+												CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+											}
+										}
 									}
 								}
-								else // DotProductA <= 0
+								else // 表裏逆方向に貫通している。あるいは片方が平面上にある
 								{
-									if (DotProductB > 0)
+									//TODO: OuterCornerのくさびから交点に収束して2頂点をマージするケースも実装してない
+									const FVector& PreSegmentProjected = FVector::VectorPlaneProject(PreSegmentDir, TwoEdgePlaneNormal);
+
+									// PreSegmentは交点に向かう方向なのでわかりやすいように交点から出ていく方向になるようにマイナスをかける
+									const FVector& PreSegmentCrossProductWithEdgeA = FVector::CrossProduct(EdgeADir, -PreSegmentProjected);
+									const FVector& PreSegmentCrossProductWithEdgeB = FVector::CrossProduct(-PreSegmentProjected, EdgeBDir);
+
+									// 前のセグメントがエッジAとエッジBのなす平面の4領域のどれを通るかを判定する内積
+									double PreSegmentDotProductA = FVector::DotProduct(PreSegmentCrossProductWithEdgeA, TwoEdgePlaneNormal);
+									double PreSegmentDotProductB = FVector::DotProduct(PreSegmentCrossProductWithEdgeA, TwoEdgePlaneNormal);
+
+									const FVector& PostSegmentProjected = FVector::VectorPlaneProject(PostSegmentDir, TwoEdgePlaneNormal);
+
+									const FVector& PostSegmentCrossProductWithEdgeA = FVector::CrossProduct(EdgeADir, PostSegmentProjected);
+									const FVector& PostSegmentCrossProductWithEdgeB = FVector::CrossProduct(PostSegmentProjected, EdgeBDir);
+
+									// 前のセグメントがエッジAとエッジBのなす平面の4領域のどれを通るかを判定する内積
+									double PostSegmentDotProductA = FVector::DotProduct(PostSegmentCrossProductWithEdgeA, TwoEdgePlaneNormal);
+									double PostSegmentDotProductB = FVector::DotProduct(PostSegmentCrossProductWithEdgeA, TwoEdgePlaneNormal);
+
+									if (PreSegmentDotProductA > 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB > 0)
 									{
-										CornerTypes[PairIdx] = CornerType::SideEdge;
-										// IgnoreA
+										CornerTypes[PairIdx] = CornerType::OuterCorner;
+										// CrossesAThenB
 										CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
 									}
-									else // DotProductB <= 0
+									else if (PreSegmentDotProductA < 0 && PreSegmentDotProductB > 0 && PostSegmentDotProductA > 0 && PostSegmentDotProductB < 0)
 									{
-										CornerTypes[PairIdx] = CornerType::UnstableCorner;
-										// TODO:これはMovementPhaseでの動きから判定が必要
-
-										// TODO:実装が冗長
-										if (FVector::DotProduct(Movement, EdgeADir) > FVector::DotProduct(Movement, EdgeBDir))
-										{
-											// MoveAlongA
-											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
-										}
-										else
-										{
-											// MoveAlongB
-											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
-										}
+										CornerTypes[PairIdx] = CornerType::OuterCorner;
+										// CrossesBThenA
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+									}
+									else if (PreSegmentDotProductA < 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA > 0 && PostSegmentDotProductB > 0)
+									{
+										// TODO:実装。確かInnerConer扱いだが忘れた。動画見て確認する
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+										// TODO:とりあえず
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+									}
+									else if (PreSegmentDotProductA > 0 && PreSegmentDotProductB > 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB < 0)
+									{
+										// TODO:実装。確かInnerConer扱いだが忘れた。動画見て確認する
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+										// TODO:とりあえず
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+									}
+									else
+									{
+										// TODO:表裏貫通でこのケースは存在しない？動画見て確認する
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+										// TODO:とりあえず
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
 									}
 								}
-								//TODO: 表裏2回で貫通するときの1ケースであるOuterCornerを判定できてない
-								//TODO: OuterCornerのくさびから交点に収束して2頂点をマージするケースも実装してない
 							}
 						}
 					}
