@@ -1282,7 +1282,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 										if (DotProductB > 0)
 										{
 											CornerTypes[PairIdx] = CornerType::InnerCorner;
-											// TODO:Stableの場合、所属エッジがイテレーションごとに入れ替わる可能性があり、不安定になりそうだが？
+											// TODO:InnerCornerの場合、所属エッジがイテレーションごとに入れ替わる可能性があり、不安定になりそうだが？MoveAlongでなくStableという状態を作ってエッジ移動させずに安定状態として扱うべき？
 
 											// TODO:実装が冗長
 											if (FVector::DotProduct(Movement, EdgeADir) > FVector::DotProduct(Movement, EdgeBDir))
@@ -1386,6 +1386,63 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 										CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
 									}
 								}
+							}
+						}
+
+						// エッジ移動に採用するペアの候補を洗い出す。まずは現在のエッジを含むペアを抽出する。
+						check(EdgeIdxOfPositions[ParticleIdx] != INDEX_NONE);
+						TArray<int32> CandidatesPairIndices;
+						for (int32 PairIdx = 0; PairIdx < EdgePairs.Num(); PairIdx++)
+						{
+							const TPair<int32, int32>& EdgePair = EdgePairs[PairIdx];
+							int32 EdgeIdxA = EdgePair.Key;
+							int32 EdgeIdxB = EdgePair.Value;
+							if ((EdgeIdxA == EdgeIdxOfPositions[ParticleIdx] || EdgeIdxB == EdgeIdxOfPositions[ParticleIdx])
+								&& CornerTypes[PairIdx] != CornerType::SideEdge) // SideEdgeは移動候補から除外する
+							{
+								CandidatesPairIndices.Add(PairIdx);
+							}
+						}
+
+						// 現在のエッジを含むペアのテーブルから、エッジ移動を決定する
+						if (CandidatesPairIndices.Num() > 0) // 移動候補が全くなければ移動しない
+						{
+							// ペアをCornerTypeごとの配列に分類
+							TArray<int32> InnerCornerPairIndices;
+							TArray<int32> UnstableCornerPairIndices;
+							TArray<int32> OuterCornerPairIndices;
+
+							for (int32 PairIdx : CandidatesPairIndices)
+							{
+								switch (CornerTypes[PairIdx])
+								{
+									case CornerType::InnerCorner:
+										InnerCornerPairIndices.Add(PairIdx);
+										break;
+									case CornerType::UnstableCorner:
+										UnstableCornerPairIndices.Add(PairIdx);
+										break;
+									case CornerType::OuterCorner:
+										OuterCornerPairIndices.Add(PairIdx);
+										break;
+									case CornerType::SideEdge:
+									default:
+										check(false);
+										break;
+								}
+							}
+
+							if (InnerCornerPairIndices.Num() > 0)
+							{
+								// TODO:複数あったらどれを採用する？
+							}
+							else if (UnstableCornerPairIndices.Num() > 0)
+							{
+								// TODO:複数あったらどれを採用する？
+							}
+							else if (OuterCornerPairIndices.Num() > 0)
+							{
+								// TODO:これってどうするんだ？
 							}
 						}
 					}
