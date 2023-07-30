@@ -1435,6 +1435,30 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							if (InnerCornerPairIndices.Num() > 0)
 							{
 								// TODO:複数あったらどれを採用する？
+								// TODO:とりあえず一個目のものを採用しておく
+								const TPair<int32, int32>& EdgePair = EdgePairs[InnerCornerPairIndices[0]];
+								// ペアの中で今のエッジじゃない方にエッジ移動する
+								// TODO:CornerEdgeIdxInfos[PairIdx]は使わない？
+								if (EdgePair.Key != EdgeIdxOfPositions[ParticleIdx])
+								{
+									EdgeIdxOfPositions[ParticleIdx] = EdgePair.Key;
+									// ここでMovelFlagを立てるとイテレーションのたびにエッジが交互に移動してイテレーションが
+									// 無限ループになるので立てない
+									// TODO:本来はMoveAlongだけでなくStable状態も作るべき
+									//MovedFlagOfPositions[ParticleIdx] = true;
+								}
+								else if (EdgePair.Value != EdgeIdxOfPositions[ParticleIdx])
+								{
+									EdgeIdxOfPositions[ParticleIdx] = EdgePair.Value;
+									// ここでMovelFlagを立てるとイテレーションのたびにエッジが交互に移動してイテレーションが
+									// 無限ループになるので立てない
+									// TODO:本来はMoveAlongだけでなくStable状態も作るべき
+									//MovedFlagOfPositions[ParticleIdx] = true;
+								}
+								else
+								{
+									check(false);
+								}
 							}
 							else if (UnstableCornerPairIndices.Num() > 0)
 							{
