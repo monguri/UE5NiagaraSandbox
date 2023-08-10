@@ -57,6 +57,9 @@ private:
 	bool bDrawTraceToRemove = false;
 
 	UPROPERTY(EditAnywhere)
+	bool bDrawTensionDir = false;
+
+	UPROPERTY(EditAnywhere, Meta = (UIMin = 0.00000002, ClampMin = 0.00000002)) // 0.00000002 is UE_SMALL_NUMBER * 2
 	float Tolerance = 0.1f;
 
 	UPROPERTY(EditAnywhere)

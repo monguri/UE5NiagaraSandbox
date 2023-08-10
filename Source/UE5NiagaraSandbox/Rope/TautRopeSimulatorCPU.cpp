@@ -71,9 +71,17 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ParentPositions"), ParentPositions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("ChildPositions"), ChildPositions);
 
-	// TODO:bDrawCollisionEdgeによるデバッグ表示切替
 	if (bDrawCollisionEdge)
 	{
+		// TODO:これもいっそNiagaraで描画するか？
+		for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+		{
+			const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+			const FVector& LineStartWS = GetActorTransform().TransformPosition(Edge.Key);
+			const FVector& LineEndWS = GetActorTransform().TransformPosition(Edge.Value);
+			DrawDebugLine(GetWorld(), LineStartWS, LineEndWS, FLinearColor::Red.ToFColorSRGB());
+		}
+
 		EdgeIdxDebugDrawPositions.Reset();
 		for (const TPair<FVector, FVector>& Pair : RopeBlockerTriMeshEdgeArray)
 		{
@@ -85,6 +93,21 @@ void ATautRopeSimulatorCPU::Tick(float DeltaSeconds)
 	{
 		// 空配列を渡すことでエッジのデバッグ描画用のパーティクルを0にする
 		UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("EdgeIdxDebugDrawPositions"), TArray<FVector>());
+	}
+
+	if (bDrawTensionDir)
+	{
+		for (int32 ParticleIdx = 1; ParticleIdx < Positions.Num() - 1; ParticleIdx++)
+		{
+			// TODO:頂点間がToleranceより近い場合は頂点をまとめるべきなのでこのTolerance処理は必要ない
+			const FVector& PreSegmentDir = (Positions[ParticleIdx] - Positions[ParticleIdx - 1]).GetSafeNormal(Tolerance);
+			const FVector& PostSegmentDir = (Positions[ParticleIdx + 1] - Positions[ParticleIdx]).GetSafeNormal(Tolerance);
+			const FVector& TensionDir = (-PreSegmentDir + PostSegmentDir).GetSafeNormal(Tolerance);
+
+			const FVector& LineStartWS = GetActorTransform().TransformPosition(Positions[ParticleIdx]);
+			const FVector& LineEndWS = GetActorTransform().TransformPosition(Positions[ParticleIdx] + TensionDir * 100); // TODO:適当に1メートル
+			DrawDebugLine(GetWorld(), LineStartWS, LineEndWS, FLinearColor::Blue.ToFColorSRGB(), false, -1.f, ESceneDepthPriorityGroup::SDPG_Foreground);
+		}
 	}
 }
 
@@ -225,452 +248,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraintOld()
 {
 	using namespace NiagaraSandbox::RopeSimulator;
 
-	if (bDrawCollisionEdge)
-	{
-		for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
-		{
-			const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
-			const FVector& LineStartWS = GetActorTransform().TransformPosition(Edge.Key);
-			const FVector& LineEndWS = GetActorTransform().TransformPosition(Edge.Value);
-			DrawDebugLine(GetWorld(), LineStartWS, LineEndWS, FLinearColor::Red.ToFColorSRGB());
-		}
-	}
-
-	// MovementPhaseとCollisionPhaseの全頂点のイテレーション。収束するまでループする。
-	bool bExistMovedParticle = false;
-	if (Positions[0] != PrevPositions[0]
-		|| Positions[Positions.Num() - 1] != PrevPositions[Positions.Num() - 1]) // TODO:Toleranceを入れないでみる
-	{
-		bExistMovedParticle = true;
-	}
-
-	for (int32 IterCount = 0; IterCount < MaxIteration && bExistMovedParticle; IterCount++)
-	{
-		bool bExistAddedParticle = false;
-
-		// TODO: 逆方向ループはあとで必要か検討する
-		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx = ((bExistAddedParticle && ParticleIdx == 0) ? 0 : ParticleIdx + 1)) // 始点のときのみ頂点追加があったらもう一度始点で行う
-		{
-			//
-			// MovementPhase
-			//
-			bool bNeedCollisionPhase = false;
-			MovedFlagOfPositions[ParticleIdx] = false;
-			{
-				if (ParticleIdx == 0)
-				{
-					if (Positions[0] != PrevPositions[0]) // TODO:Toleranceを入れないでみる
-					{
-						bNeedCollisionPhase = true;
-					}
-
-					// 始点と終点は1フレームに一度しか動かさないので即Movedフラグを下げる
-					MovedFlagOfPositions[ParticleIdx] = false;
-				}
-				else if (ParticleIdx == (Positions.Num() - 1))
-				{
-					if (Positions[Positions.Num() - 1] != PrevPositions[Positions.Num() - 1]) // TODO:Toleranceを入れないでみる
-					{
-						bNeedCollisionPhase = true;
-					}
-
-					// 始点と終点は1フレームに一度しか動かさないので即Movedフラグを下げる
-					MovedFlagOfPositions[ParticleIdx] = false;
-				}
-				else // 始点と終点以外は最短コンストレイント
-				{
-					check(EdgeIdxOfPositions[ParticleIdx] != INDEX_NONE);
-					const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdxOfPositions[ParticleIdx]];
-					const FVector& EdgeStart = Edge.Key;
-					const FVector& EdgeEnd = Edge.Value;
-
-					const FVector& StartPoint = Positions[ParticleIdx - 1];
-					const FVector& EndPoint = Positions[ParticleIdx + 1];
-
-					// 動いてるのがStartPointであろうとEndPointであろうとStartPointPlane側を回転させて
-					// 最短交点を計算する
-
-					// エッジの直線に垂線を下ろした点 // TODO:エッジ移動を考えないので線分でなく直線で足を求めている
-					const FVector& StartPointDropFoot = FMath::ClosestPointOnInfiniteLine(EdgeStart, EdgeEnd, StartPoint);
-					const FVector& EndPointDropFoot = FMath::ClosestPointOnInfiniteLine(EdgeStart, EdgeEnd, EndPoint);
-
-					double StartPointPerpLen = (StartPoint - StartPointDropFoot).Size();
-					double EndPointPerpLen = (EndPoint - EndPointDropFoot).Size();
-					
-					// 最短になる交点は垂線の長さの比による線形補間で決まる
-					double Alpha = StartPointPerpLen / (StartPointPerpLen + EndPointPerpLen);
-					Positions[ParticleIdx] = FMath::Lerp(StartPointDropFoot, EndPointDropFoot, Alpha);
-					// TODO:エッジ移動を考えないので線分外に出たらログを出しておく
-					if (Alpha <= 0.0 || Alpha >= 1.0)
-					{
-						UE_LOG(LogTemp, Log,  TEXT("Alpha = %lf. Shortest constraint generates overgoing edge."), Alpha);
-					}
-
-					// TODO: エッジ移動は考えず、頂点追加も現状始点終点でないセグメントでは起こさない前提で、コリジョンフェイズに入れない
-					bNeedCollisionPhase = false;
-					// 収束のため閾値つきで動いたかどうか判定
-					MovedFlagOfPositions[ParticleIdx] = ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared);
-				}
-			}
-
-			//
-			// CollisionPhase
-			//
-			// 追加頂点があると始点終点はその延長までしか動かさず再度MovementPhaseをやるので延長位置を保存する
-			bExistAddedParticle = false;
-			FVector MovePosition = Positions[ParticleIdx];
-			if (bNeedCollisionPhase)
-			{
-				// TODO:実装
-				// 単に動いた時の前後セグメントでの頂点追加
-				// TODO:エッジ移動とエッジに沿った削除はあとで実装する
-				// TODO:現状、頂点追加は始点と終点のセグメント以外では考えない
-				if (ParticleIdx == 0)
-				{
-					// 動いている頂点
-					const FVector& TriVert0 = PrevPositions[ParticleIdx];
-					const FVector& TriVert1 = Positions[ParticleIdx];
-					const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
-
-					double NearestEdgeDistanceSq = DBL_MAX;
-					FVector NearestIntersectPoint = FVector::ZeroVector;
-					int32 NearestEdgeIdx = INDEX_NONE;
-					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
-					{
-						// 異なるエッジでないものは採用しない
-						if (EdgeIdxOfPositions[ParticleIdx] == EdgeIdx || EdgeIdxOfPositions[ParticleIdx + 1] == EdgeIdx)
-						{
-							continue;
-						}
-
-						const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
-						const FVector& RayStart = Edge.Key;
-						const FVector& RayEnd = Edge.Value;
-						FVector IntersectPoint;
-						FVector IntersectNormal;
-						bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
-						if (bIntersecting)
-						{
-							// 元の線分と最も近いエッジを採用
-							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
-							if (EdgeDistanceSq < NearestEdgeDistanceSq)
-							{
-								// 等距離なら最も若いインデックスを採用する
-								NearestEdgeDistanceSq = EdgeDistanceSq;
-								NearestIntersectPoint = IntersectPoint;
-								NearestEdgeIdx = EdgeIdx;
-							}
-						}
-					}
-
-					// 頂点追加
-					if (NearestEdgeIdx != INDEX_NONE)
-					{
-						// TODO:GDC動画のように延長線上を新たな終点におくと、同一平面に複数エッジがある
-						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
-						// Triangleの辺にエッジがある場合に交差を検出失敗する。
-						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
-#if 0
-						// TODO:TriVert0と1の間の点ではなく長さと向きを維持した延長線上の点にしている
-						PrevPositions[ParticleIdx] = TriVert2 + (NearestIntersectPoint - TriVert2).GetSafeNormal() * (TriVert0 - TriVert2).Size();
-#endif
-
-						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
-						Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
-						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
-						MovedFlagOfPositions.Insert(true, ParticleIdx + 1); // ここでtrueにしてもパーティクルループの自分の番のMovementPhaseで別途判定される
-
-						// MoveHalfwayPositionからPositions[ParticleIdx]の間で動かしてさらに他のエッジ接触がないかチェックする
-						bExistAddedParticle = true;
-					}
-
-					// エッジからはがす削除
-					// TODO:終点と処理が冗長
-					if (Positions.Num() >= 3)
-					{
-						// 0-2の線分の削除だけで判定していないのは、なにかに1をひっかけている状態で
-						// 0-2を大きく動かすと0-2線分上にコリジョンがいない状態になり削除対象になってしまうから
-						// TODO:本当は3つのライントレースでなくTriangleとコリジョンのOverlapをとりたかったがAPIがなかった
-						// TODO:もっといいやり方あるかも
-
-						bool bTraceComplex = false;
-						FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SolveRopeBlockersCollisionConstraintOld), bTraceComplex);
-						// Toleranceだけ0と2を双方から縮めるのは、どちらかあるいは両方がエッジと接触
-						// していたらそのエッジとヒット判定になり、1の削除判定をしたいのにできないため
-						// TODO:もっといい方法ある？
-						// Toleranceだけ1を0-2の線分側に近づけるのは、1がエッジと接触してると接触判定し続けるため
-						// TODO:もっといい方法ある？
-						const FVector& SmallTriVert0 = Positions[2] + (Positions[0] - Positions[2]).GetSafeNormal() * Tolerance;
-						const FVector& SmallTriVert1 = Positions[1] + ((Positions[2] + Positions[0]) * 0.5 - Positions[1]).GetSafeNormal() * Tolerance;
-						const FVector& SmallTriVert2 = Positions[0] + (Positions[2] - Positions[0]).GetSafeNormal() * Tolerance;
-
-						const FVector& SmallTriVertWS0 = GetActorTransform().TransformPosition(SmallTriVert0);
-						const FVector& SmallTriVertWS1 = GetActorTransform().TransformPosition(SmallTriVert1);
-						const FVector& SmallTriVertWS2 = GetActorTransform().TransformPosition(SmallTriVert2);
-
-						bool bIntersectionExist = false;
-						for (UPrimitiveComponent* Primitive : OverlapPrimitives)
-						{
-							FHitResult HitResult;
-							bool bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS0, SmallTriVertWS1, TraceParams);
-							if (bDrawTraceToRemove)
-							{
-								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS0, bHit ? HitResult.Location : SmallTriVertWS1, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-								if(bHit)
-								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS1, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
-								}
-							}
-
-							if (bHit)
-							{
-								bIntersectionExist = true;
-								break;
-							}
-
-							bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS1, SmallTriVertWS2, TraceParams);
-							if (bDrawTraceToRemove)
-							{
-								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS1, bHit ? HitResult.Location : SmallTriVertWS2, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-								if(bHit)
-								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS2, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
-								}
-							}
-
-							if (bHit)
-							{
-								bIntersectionExist = true;
-								break;
-							}
-
-							bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS2, SmallTriVertWS0, TraceParams);
-							if (bDrawTraceToRemove)
-							{
-								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS2, bHit ? HitResult.Location : SmallTriVertWS0, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-								if(bHit)
-								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS0, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
-								}
-							}
-
-							if (bHit)
-							{
-								bIntersectionExist = true;
-								break;
-							}
-						}
-
-						if (!bIntersectionExist)
-						{
-							PrevPositions.RemoveAt(1);
-							Positions.RemoveAt(1);
-							EdgeIdxOfPositions.RemoveAt(1);
-							MovedFlagOfPositions.RemoveAt(1);
-
-							// 追加したものが即削除された場合ももう追加判定はとめて次のパーティクルに進む。
-							// 追加と即削除を繰り返すとParticleIdx=0のままでループが進まないので。
-							bExistAddedParticle = false;
-						}
-					}
-
-					if (!bExistAddedParticle)
-					{
-						PrevPositions[0] = Positions[0];
-					}
-				}
-				else if (ParticleIdx == (Positions.Num() - 1))
-				{
-					// 動いている頂点
-					const FVector& TriVert1 = Positions[ParticleIdx];
-					const FVector& TriVert2 = PrevPositions[ParticleIdx];
-					
-					// 固定している頂点は始点の判定と違ってPrevPositonsでなくPositionsなのに注意。
-					// こうしないと1フレームでParticlesIdxの頂点が大きく動いたとき交差検出が漏れるケースがある
-					// https://www.gdcvault.com/play/1027351/Rope-Simulation-in-Uncharted-4
-					// の32分ごろの例。
-					const FVector& TriVert0 = Positions[ParticleIdx - 1];
-
-					// TODO: 上のifブロックと処理が冗長
-					double NearestEdgeDistanceSq = DBL_MAX;
-					FVector NearestIntersectPoint = FVector::ZeroVector;
-					int32 NearestEdgeIdx = INDEX_NONE;
-					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
-					{
-						// 異なるエッジでないものは採用しない
-						if (EdgeIdxOfPositions[ParticleIdx - 1] == EdgeIdx || EdgeIdxOfPositions[ParticleIdx] == EdgeIdx)
-						{
-							continue;
-						}
-
-						const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
-						const FVector& RayStart = Edge.Key;
-						const FVector& RayEnd = Edge.Value;
-						FVector IntersectPoint;
-						FVector IntersectNormal;
-						bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
-						if (bIntersecting)
-						{
-							// 元の線分と最も近いエッジを採用
-							double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
-							if (EdgeDistanceSq < NearestEdgeDistanceSq)
-							{
-								// 等距離なら最も若いインデックスを採用する
-								NearestEdgeDistanceSq = EdgeDistanceSq;
-								NearestIntersectPoint = IntersectPoint;
-								NearestEdgeIdx = EdgeIdx;
-							}
-						}
-					}
-
-					if (NearestEdgeIdx != INDEX_NONE)
-					{
-						// TODO:GDC動画のように延長線上を新たな終点におくと、同一平面に複数エッジがある
-						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
-						// Triangleの辺にエッジがある場合に交差を検出失敗する。
-						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
-#if 0
-						// TODO:TriVert0と1の間の点ではなく長さと向きを維持した延長線上の点にしている
-						PrevPositions[ParticleIdx] = TriVert0 + (NearestIntersectPoint - TriVert0).GetSafeNormal() * (TriVert2 - TriVert0).Size();
-#endif
-
-						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx);
-						Positions.Insert(NearestIntersectPoint, ParticleIdx);
-						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx);
-						MovedFlagOfPositions.Insert(true, ParticleIdx); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
-
-						// MoveHalfwayPositionからPositions[ParticleIdx]の間で動かしてさらに他のエッジ接触がないかチェックする
-						bExistAddedParticle = true;
-					}
-
-					// エッジからはがす削除
-					// TODO:終点と処理が冗長
-					if (Positions.Num() >= 3)
-					{
-						// 0-2の線分の削除だけで判定していないのは、なにかに1をひっかけている状態で
-						// 0-2を大きく動かすと0-2線分上にコリジョンがいない状態になり削除対象になってしまうから
-						// TODO:本当は3つのライントレースでなくTriangleとコリジョンのOverlapをとりたかったがAPIがなかった
-						// TODO:もっといいやり方あるかも
-
-						bool bTraceComplex = false;
-						FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SolveRopeBlockersCollisionConstraintOld), bTraceComplex);
-						// Toleranceだけ0と2を双方から縮めるのは、どちらかあるいは両方がエッジと接触
-						// していたらそのエッジとヒット判定になり、1の削除判定をしたいのにできないため
-						// TODO:もっといい方法ある？
-						// Toleranceだけ1を0-2の線分側に近づけるのは、1がエッジと接触してると接触判定し続けるため
-						// TODO:もっといい方法ある？
-						const FVector& SmallTriVert0 = Positions[Positions.Num() - 1] + (Positions[Positions.Num() - 3] - Positions[Positions.Num() - 1]).GetSafeNormal() * Tolerance;
-						const FVector& SmallTriVert1 = Positions[Positions.Num() - 1 - 1] + ((Positions[Positions.Num() - 1] + Positions[Positions.Num() - 3]) * 0.5 - Positions[Positions.Num() - 2]).GetSafeNormal() * Tolerance;
-						const FVector& SmallTriVert2 = Positions[Positions.Num() - 3] + (Positions[Positions.Num() - 1] - Positions[Positions.Num() - 3]).GetSafeNormal() * Tolerance;
-
-						const FVector& SmallTriVertWS0 = GetActorTransform().TransformPosition(SmallTriVert0);
-						const FVector& SmallTriVertWS1 = GetActorTransform().TransformPosition(SmallTriVert1);
-						const FVector& SmallTriVertWS2 = GetActorTransform().TransformPosition(SmallTriVert2);
-
-						bool bIntersectionExist = false;
-						for (UPrimitiveComponent* Primitive : OverlapPrimitives)
-						{
-							FHitResult HitResult;
-							bool bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS0, SmallTriVertWS1, TraceParams);
-							if (bDrawTraceToRemove)
-							{
-								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS0, bHit ? HitResult.Location : SmallTriVertWS1, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-								if(bHit)
-								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS1, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
-								}
-							}
-
-							if (bHit)
-							{
-								bIntersectionExist = true;
-								break;
-							}
-
-							bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS1, SmallTriVertWS2, TraceParams);
-							if (bDrawTraceToRemove)
-							{
-								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS1, bHit ? HitResult.Location : SmallTriVertWS2, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-								if(bHit)
-								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS2, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
-								}
-							}
-
-							if (bHit)
-							{
-								bIntersectionExist = true;
-								break;
-							}
-
-							bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS2, SmallTriVertWS0, TraceParams);
-							if (bDrawTraceToRemove)
-							{
-								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS2, bHit ? HitResult.Location : SmallTriVertWS0, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
-								if(bHit)
-								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS0, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
-								}
-							}
-
-							if (bHit)
-							{
-								bIntersectionExist = true;
-								break;
-							}
-						}
-
-						if (!bIntersectionExist)
-						{
-							int32 LastIdx = Positions.Num() - 2;
-							PrevPositions.RemoveAt(LastIdx);
-							Positions.RemoveAt(LastIdx);
-							EdgeIdxOfPositions.RemoveAt(LastIdx);
-							MovedFlagOfPositions.RemoveAt(LastIdx);
-
-							bExistAddedParticle = false;
-						}
-					}
-
-					if (!bExistAddedParticle)
-					{
-						PrevPositions[Positions.Num() - 1] = Positions[Positions.Num() - 1];
-					}
-				}
-				else
-				{
-					check(false);
-				}
-			}
-			else
-			{
-				check(!bExistAddedParticle);
-				PrevPositions[ParticleIdx] = Positions[ParticleIdx];
-			}
-		}
-
-		bExistMovedParticle = false;
-		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num() - 1; ParticleIdx++)
-		{
-			if (MovedFlagOfPositions[ParticleIdx])
-			{
-				bExistMovedParticle = true;
-				break;
-			}
-		}
-	}
-}
-
-void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
-{
-	using namespace NiagaraSandbox::RopeSimulator;
-
 	// TODO:これもいっそNiagaraで描画するか？
 	if (bDrawCollisionEdge)
 	{
@@ -691,18 +268,25 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		bExistMovedParticle = true;
 	}
 
+	//
+	// イテレーションループ　ここから
+	//
 	for (int32 IterCount = 0; IterCount < MaxIteration && bExistMovedParticle; IterCount++)
 	{
 		bool bExistAddedParticle = false;
 
+		//
+		// パーティクルループ　ここから
+		//
 		// TODO: 逆方向ループはあとで必要か検討する
 		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx = ((bExistAddedParticle && ParticleIdx == 0) ? 0 : ParticleIdx + 1)) // 始点のときのみ頂点追加があったらもう一度始点で行う
 		{
-			//
-			// MovementPhase
-			//
 			bool bNeedCollisionPhase = false;
 			MovedFlagOfPositions[ParticleIdx] = false;
+
+			//
+			// MovementPhase　ここから
+			//
 			{
 				if (ParticleIdx == 0)
 				{
@@ -768,15 +352,21 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					MovedFlagOfPositions[ParticleIdx] = ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared);
 				}
 			}
+			//
+			// MovementPhase　ここまで
+			//
 
-			//
-			// CollisionPhase
-			//
 			// 追加頂点があると始点終点はその延長までしか動かさず再度MovementPhaseをやるので延長位置を保存する
 			bExistAddedParticle = false;
-			FVector MovePosition = Positions[ParticleIdx];
+
+			//
+			// CollisionPhase　ここから
+			//
 			if (bNeedCollisionPhase)
 			{
+				//
+				// 始点セグメントのCollisionPhase　ここから
+				// 
 				// 単に動いた時の前後セグメントでの頂点追加
 				// TODO:エッジ移動とエッジに沿った削除はあとで実装する
 				// TODO:現状、頂点追加は始点と終点のセグメント以外では考えない
@@ -870,10 +460,10 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							if (bDrawTraceToRemove)
 							{
 								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS0, bHit ? HitResult.Location : SmallTriVertWS1, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+								DrawDebugLine(GetWorld(), SmallTriVertWS0, bHit ? HitResult.Location : SmallTriVertWS1, FColor(255, 128, 0), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								if(bHit)
 								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS1, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS1, FColor(0, 128, 255), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								}
 							}
 
@@ -887,10 +477,10 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							if (bDrawTraceToRemove)
 							{
 								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS1, bHit ? HitResult.Location : SmallTriVertWS2, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+								DrawDebugLine(GetWorld(), SmallTriVertWS1, bHit ? HitResult.Location : SmallTriVertWS2, FColor(255, 128, 0), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								if(bHit)
 								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS2, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS2, FColor(0, 128, 255), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								}
 							}
 
@@ -904,10 +494,10 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							if (bDrawTraceToRemove)
 							{
 								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS2, bHit ? HitResult.Location : SmallTriVertWS0, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+								DrawDebugLine(GetWorld(), SmallTriVertWS2, bHit ? HitResult.Location : SmallTriVertWS0, FColor(255, 128, 0), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								if(bHit)
 								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS0, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS0, FColor(0, 128, 255), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								}
 							}
 
@@ -936,6 +526,13 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						PrevPositions[0] = Positions[0];
 					}
 				}
+				//
+				// 始点セグメントのCollisionPhase　ここまで
+				// 
+
+				//
+				// 終点セグメントのCollisionPhase　ここから
+				// 
 				else if (ParticleIdx == (Positions.Num() - 1))
 				{
 					// 動いている頂点
@@ -1031,10 +628,10 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							if (bDrawTraceToRemove)
 							{
 								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS0, bHit ? HitResult.Location : SmallTriVertWS1, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+								DrawDebugLine(GetWorld(), SmallTriVertWS0, bHit ? HitResult.Location : SmallTriVertWS1, FColor(255, 128, 0), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								if(bHit)
 								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS1, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS1, FColor(0, 128, 255), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								}
 							}
 
@@ -1048,10 +645,10 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							if (bDrawTraceToRemove)
 							{
 								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS1, bHit ? HitResult.Location : SmallTriVertWS2, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+								DrawDebugLine(GetWorld(), SmallTriVertWS1, bHit ? HitResult.Location : SmallTriVertWS2, FColor(255, 128, 0), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								if(bHit)
 								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS2, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS2, FColor(0, 128, 255), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								}
 							}
 
@@ -1065,10 +662,10 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							if (bDrawTraceToRemove)
 							{
 								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
-								DrawDebugLine(GetWorld(), SmallTriVertWS2, bHit ? HitResult.Location : SmallTriVertWS0, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+								DrawDebugLine(GetWorld(), SmallTriVertWS2, bHit ? HitResult.Location : SmallTriVertWS0, FColor(255, 128, 0), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								if(bHit)
 								{
-									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS0, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS0, FColor(0, 128, 255), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
 								}
 							}
 
@@ -1096,6 +693,13 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						PrevPositions[Positions.Num() - 1] = Positions[Positions.Num() - 1];
 					}
 				}
+				//
+				// 終点セグメントのCollisionPhase　ここまで
+				// 
+
+				//
+				// 始点終点以外のセグメントのCollisionPhase　ここから
+				// 
 				else
 				{
 					// エッジ端に到達した場合
@@ -1119,7 +723,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 					if (IntersectedEdgeIndices.Num() == 1)
 					{
-						// 検出したエッジは現在所属していエッジであるはず
+						// 検出したエッジは現在所属しているエッジであるはず
 						check(IntersectedEdgeIndices[0] == EdgeIdxOfPositions[ParticleIdx]);
 						// メッシュとしてエッジ端に他のエッジが全く接してないのは許容できない
 						check(false);
@@ -1163,7 +767,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 								}
 							}
 						}
-						else if (FVector::Coincident(-PreSegmentDir, PostSegmentDir)) //TODO:ToleranceはFVector::Parallelのデフォルト任せ
+						else if (FVector::Coincident(-PreSegmentDir, PostSegmentDir)) //TODO:ToleranceはFVector::Coincidentのデフォルト任せ
 						{
 							
 							ParticleNormal = PreSegmentDir;
@@ -1224,7 +828,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							const FVector& EdgeBDir = (EdgeB.Value - EdgeB.Key).GetSafeNormal(Tolerance, FVector::ZAxisVector); // ZAxisVectorにしているのはデフォルトのZeroVectorになると外積判定がおかしくなるのでとりあえず
 							const FVector& Movement = Positions[ParticleIdx] - PrevPositions[ParticleIdx];
 
-							if (FVector::Coincident(EdgeADir, EdgeBDir)) // エッジが0度。閉じたくさび。//TODO:ToleranceはFVector::Parallelのデフォルト任せ
+							if (FVector::Coincident(EdgeADir, EdgeBDir)) // エッジが0度。閉じたくさび。//TODO:ToleranceはFVector::Coincidentのデフォルト任せ
 							{
 								CornerTypes[PairIdx] = CornerType::InnerCorner;
 								// TODO:Stableの場合、所属エッジがイテレーションごとに入れ替わる可能性があり、不安定になりそうだが？
@@ -1240,7 +844,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 									CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
 								}
 							}
-							else if (FVector::Coincident(-EdgeADir, EdgeBDir)) // エッジが180度。//TODO:ToleranceはFVector::Parallelのデフォルト任せ
+							else if (FVector::Coincident(-EdgeADir, EdgeBDir)) // エッジが180度。//TODO:ToleranceはFVector::Coincidentのデフォルト任せ
 							{
 								// InnerCornerの別のエッジがあったときにそちらを優先したいのでInnerCornerでなくUnstableCornerにしておく
 								CornerTypes[PairIdx] = CornerType::UnstableCorner;
@@ -1471,14 +1075,27 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						}
 					}
 				}
+				//
+				// 始点終点以外のセグメントのCollisionPhase　ここまで
+				// 
 			}
-			else
+			//
+			// CollisionPhase　ここまで
+			//
+
+			else // bNeedCollisionPhaseがflaseのときの処理
 			{
 				check(!bExistAddedParticle);
 				PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 			}
 		}
+		//
+		// パーティクルループ　ここまで
+		//
 
+		//
+		// イテレーション早期打ち切りのための動いた頂点があるかどうかの判定
+		//
 		bExistMovedParticle = false;
 		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num() - 1; ParticleIdx++)
 		{
@@ -1489,6 +1106,1101 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			}
 		}
 	}
+	//
+	// イテレーションループ　ここまで
+	//
+}
+
+void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
+{
+	using namespace NiagaraSandbox::RopeSimulator;
+
+	// MovementPhaseとCollisionPhaseの全頂点のイテレーション。収束するまでループする。
+	bool bExistMovedParticle = false;
+	if (Positions[0] != PrevPositions[0]
+		|| Positions[Positions.Num() - 1] != PrevPositions[Positions.Num() - 1]) // TODO:Toleranceを入れないでみる
+	{
+		bExistMovedParticle = true;
+	}
+
+	//
+	// イテレーションループ　ここから
+	//
+	for (int32 IterCount = 0; IterCount < MaxIteration && bExistMovedParticle; IterCount++)
+	{
+		bool bExistAddedParticle = false;
+
+		//
+		// パーティクルループ　ここから
+		//
+		// TODO: 逆方向ループはあとで必要か検討する
+		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx = (bExistAddedParticle && (ParticleIdx != Positions.Num() - 1)) ? ParticleIdx : ParticleIdx + 1) // 終点だったとき以外、頂点追加があったらもう一度そこから行う
+		{
+			bool bNeedCollisionPhase = false;
+			MovedFlagOfPositions[ParticleIdx] = false;
+
+			//
+			// MovementPhase　ここから
+			//
+			{
+				if (ParticleIdx == 0)
+				{
+					bNeedCollisionPhase = (Positions[0] != PrevPositions[0]); // TODO:Toleranceを入れないでみる
+
+					// 始点と終点は1フレームに一度しか動かさないので即Movedフラグを下げる
+					MovedFlagOfPositions[ParticleIdx] = false;
+				}
+				else if (ParticleIdx == (Positions.Num() - 1))
+				{
+					bNeedCollisionPhase = (Positions[Positions.Num() - 1] != PrevPositions[Positions.Num() - 1]); // TODO:Toleranceを入れないでみる
+
+					// 始点と終点は1フレームに一度しか動かさないので即Movedフラグを下げる
+					MovedFlagOfPositions[ParticleIdx] = false;
+				}
+				else // 始点と終点以外は最短コンストレイント
+				{
+					check(EdgeIdxOfPositions[ParticleIdx] != INDEX_NONE);
+					const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdxOfPositions[ParticleIdx]];
+					const FVector& EdgeStart = Edge.Key;
+					const FVector& EdgeEnd = Edge.Value;
+
+					FVector StartPoint = Positions[ParticleIdx - 1];
+					FVector EndPoint = Positions[ParticleIdx + 1];
+
+					// 頂点の位置が一致していると最短コンストレイントでは動かないので隣の頂点を使う
+					for (int32 i = ParticleIdx - 1; i >= 0; i--)
+					{
+						if ((Positions[ParticleIdx] - Positions[i]).SizeSquared() > ToleranceSquared)
+						{
+							StartPoint = Positions[i];
+							break;
+						}
+					}
+					for (int32 i = ParticleIdx + 1; i < Positions.Num(); i++)
+					{
+						if ((Positions[ParticleIdx] - Positions[i]).SizeSquared() > ToleranceSquared)
+						{
+							EndPoint = Positions[i];
+							break;
+						}
+					}
+
+					// 動いてるのがStartPointであろうとEndPointであろうとStartPointPlane側を回転させて
+					// 最短交点を計算する
+
+					// エッジの直線に垂線を下ろした点をエッジを直線にして計算
+					const FVector& StartPointDropFoot = FMath::ClosestPointOnInfiniteLine(EdgeStart, EdgeEnd, StartPoint);
+					const FVector& EndPointDropFoot = FMath::ClosestPointOnInfiniteLine(EdgeStart, EdgeEnd, EndPoint);
+
+					double StartPointPerpLen = (StartPoint - StartPointDropFoot).Size();
+					double EndPointPerpLen = (EndPoint - EndPointDropFoot).Size();
+					
+					// 最短になる交点は垂線の長さの比による線形補間で決まる
+					double Alpha = StartPointPerpLen / (StartPointPerpLen + EndPointPerpLen);
+					const FVector& ShortestPointOnInfiniteLine = FMath::Lerp(StartPointDropFoot, EndPointDropFoot, Alpha);
+					double EdgeLenSqr = FVector::DotProduct(EdgeEnd - EdgeStart, EdgeEnd - EdgeStart);
+
+					// エッジは線分なのでクランプする
+					bool bClamped = false;
+					if (FVector::DotProduct(ShortestPointOnInfiniteLine - EdgeStart, EdgeEnd - EdgeStart) > (EdgeLenSqr - ToleranceSquared))
+					{
+						// EdgeEndぴったりにはせず、Tolerance/2離れた場所にする。ぴったりにすると頂点マージが
+						// 必要な時に2頂点が同じ場所になりえるので判定に問題が出る。
+						// 交差点検出ができるようにToleranceでなくTolerance/2にしている
+						Positions[ParticleIdx] = EdgeEnd - (EdgeEnd - EdgeStart).GetSafeNormal() * Tolerance * 0.5;
+						bClamped = true;
+					}
+					else if (FVector::DotProduct(ShortestPointOnInfiniteLine - EdgeEnd, EdgeStart - EdgeEnd) > (EdgeLenSqr - ToleranceSquared))
+					{
+						// EdgeEndぴったりにはせず、Tolerance/2離れた場所にする。ぴったりにすると頂点マージが
+						// 必要な時に2頂点が同じ場所になりえるので判定に問題が出る。
+						// 交差点検出ができるようにToleranceでなくTolerance/2にしている
+						Positions[ParticleIdx] = EdgeStart + (EdgeEnd - EdgeStart).GetSafeNormal() * Tolerance * 0.5;
+						bClamped = true;
+					}
+					else
+					{
+						Positions[ParticleIdx] = ShortestPointOnInfiniteLine;
+						bClamped = false;
+					}
+
+					// エッジの端にクランプされたとき、動いていたらCollisionPhaseへ。属すべきエッジの変化が起きうるので、エッジ移動、頂点削除、追加などの判定を行う。
+					bNeedCollisionPhase = bClamped && (Positions[ParticleIdx] != PrevPositions[ParticleIdx]); // TODO:Toleranceを入れないでみる
+
+					// 収束のため閾値つきで動いたかどうか判定
+					MovedFlagOfPositions[ParticleIdx] = ((PrevPositions[ParticleIdx] - Positions[ParticleIdx]).SizeSquared() > ToleranceSquared);
+				}
+			}
+			//
+			// MovementPhase　ここまで
+			//
+
+			// 追加頂点があると始点終点はその延長までしか動かさず再度MovementPhaseをやるので延長位置を保存する
+			bExistAddedParticle = false;
+
+			//
+			// CollisionPhase　ここから
+			//
+			if (bNeedCollisionPhase)
+			{
+				//
+				// 始点セグメントのCollisionPhase　ここから
+				// 
+				// 単に動いた時の前後セグメントでの頂点追加
+				// TODO:エッジ移動とエッジに沿った削除はあとで実装する
+				// TODO:現状、頂点追加は始点と終点のセグメント以外では考えない
+				if (ParticleIdx == 0)
+				{
+					// 動いている頂点
+					const FVector& TriVert0 = PrevPositions[ParticleIdx];
+					const FVector& TriVert1 = Positions[ParticleIdx];
+					const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
+
+					double NearestEdgeDistanceSq = DBL_MAX;
+					FVector NearestIntersectPoint = FVector::ZeroVector;
+					int32 NearestEdgeIdx = INDEX_NONE;
+					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+					{
+						// 異なるエッジでないものは採用しない
+						if (EdgeIdxOfPositions[ParticleIdx] == EdgeIdx || EdgeIdxOfPositions[ParticleIdx + 1] == EdgeIdx)
+						{
+							continue;
+						}
+
+						const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+						const FVector& RayStart = Edge.Key;
+						const FVector& RayEnd = Edge.Value;
+						FVector IntersectPoint;
+						FVector IntersectNormal;
+						bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
+						if (bIntersecting)
+						{
+							// 既存の動いてない方の頂点と近すぎるものは追加しない。複数エッジの交点と衝突した場合に複数頂点追加しうるので
+							if ((IntersectPoint - TriVert2).SizeSquared() > ToleranceSquared)
+							{
+								// 元の線分と最も近いエッジを採用
+								double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
+								if (EdgeDistanceSq < NearestEdgeDistanceSq)
+								{
+									// 等距離なら最も若いインデックスを採用する
+									NearestEdgeDistanceSq = EdgeDistanceSq;
+									NearestIntersectPoint = IntersectPoint;
+									NearestEdgeIdx = EdgeIdx;
+								}
+							}
+						}
+					}
+
+					// 頂点追加
+					if (NearestEdgeIdx != INDEX_NONE)
+					{
+						// TODO:GDC動画のように延長線上を新たな終点におくと、同一平面に複数エッジがある
+						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
+						// Triangleの辺にエッジがある場合に交差を検出失敗する。
+						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
+						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
+						Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
+						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
+						MovedFlagOfPositions.Insert(true, ParticleIdx + 1); // ここでtrueにしてもパーティクルループの自分の番のMovementPhaseで別途判定される
+
+						// MoveHalfwayPositionからPositions[ParticleIdx]の間で動かしてさらに他のエッジ接触がないかチェックする
+						bExistAddedParticle = true;
+					}
+
+					// エッジからはがす削除
+					// TODO:終点と処理が冗長
+					if (Positions.Num() >= 3)
+					{
+						// 0-2の線分の削除だけで判定していないのは、なにかに1をひっかけている状態で
+						// 0-2を大きく動かすと0-2線分上にコリジョンがいない状態になり削除対象になってしまうから
+						// TODO:本当は3つのライントレースでなくTriangleとコリジョンのOverlapをとりたかったがAPIがなかった
+						// TODO:もっといいやり方あるかも
+
+						bool bTraceComplex = false;
+						FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SolveRopeBlockersCollisionConstraint), bTraceComplex);
+						// Toleranceだけ0と2を双方から縮めるのは、どちらかあるいは両方がエッジと接触
+						// していたらそのエッジとヒット判定になり、1の削除判定をしたいのにできないため
+						// TODO:もっといい方法ある？
+						// Toleranceだけ1を0-2の線分側に近づけるのは、1がエッジと接触してると接触判定し続けるため
+						// TODO:もっといい方法ある？
+
+						// 2があまりに1に近いとTriangleにならずに正しい判定ができないのでそういうときは近くないものを探しに行く
+						FVector Position2 = Positions[2];
+						for (int32 i = 2; i < Positions.Num(); i++)
+						{
+							if ((Positions[i] - Positions[1]).SizeSquared() > ToleranceSquared)
+							{
+								Position2 = Positions[i];
+								break;
+							}
+						}
+
+						const FVector& SmallTriVert0 = Position2 + (Positions[0] - Position2).GetSafeNormal() * Tolerance;
+						const FVector& SmallTriVert1 = Positions[1] + ((Position2 + Positions[0]) * 0.5 - Positions[1]).GetSafeNormal() * Tolerance;
+						const FVector& SmallTriVert2 = Positions[0] + (Position2 - Positions[0]).GetSafeNormal() * Tolerance;
+
+						const FVector& SmallTriVertWS0 = GetActorTransform().TransformPosition(SmallTriVert0);
+						const FVector& SmallTriVertWS1 = GetActorTransform().TransformPosition(SmallTriVert1);
+						const FVector& SmallTriVertWS2 = GetActorTransform().TransformPosition(SmallTriVert2);
+
+						bool bIntersectionExist = false;
+						for (UPrimitiveComponent* Primitive : OverlapPrimitives)
+						{
+							FHitResult HitResult;
+							bool bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS0, SmallTriVertWS1, TraceParams);
+							if (bDrawTraceToRemove)
+							{
+								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+								DrawDebugLine(GetWorld(), SmallTriVertWS0, bHit ? HitResult.Location : SmallTriVertWS1, FColor(255, 128, 0), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
+								if(bHit)
+								{
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS1, FColor(0, 128, 255), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
+								}
+							}
+
+							if (bHit)
+							{
+								bIntersectionExist = true;
+								break;
+							}
+
+							bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS1, SmallTriVertWS2, TraceParams);
+							if (bDrawTraceToRemove)
+							{
+								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+								DrawDebugLine(GetWorld(), SmallTriVertWS1, bHit ? HitResult.Location : SmallTriVertWS2, FColor(255, 128, 0), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
+								if(bHit)
+								{
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS2, FColor(0, 128, 255), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
+								}
+							}
+
+							if (bHit)
+							{
+								bIntersectionExist = true;
+								break;
+							}
+
+							bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS2, SmallTriVertWS0, TraceParams);
+							if (bDrawTraceToRemove)
+							{
+								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+								DrawDebugLine(GetWorld(), SmallTriVertWS2, bHit ? HitResult.Location : SmallTriVertWS0, FColor(255, 128, 0), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
+								if(bHit)
+								{
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS0, FColor(0, 128, 255), false, -1.0f, ESceneDepthPriorityGroup::SDPG_World, 2.0f);
+								}
+							}
+
+							if (bHit)
+							{
+								bIntersectionExist = true;
+								break;
+							}
+						}
+
+						if (!bIntersectionExist)
+						{
+							PrevPositions.RemoveAt(1);
+							Positions.RemoveAt(1);
+							EdgeIdxOfPositions.RemoveAt(1);
+							MovedFlagOfPositions.RemoveAt(1);
+
+							// 追加したものが即削除された場合ももう追加判定はとめて次のパーティクルに進む。
+							// 追加と即削除を繰り返すとParticleIdx=0のままでループが進まないので。
+							bExistAddedParticle = false;
+						}
+					}
+
+					if (!bExistAddedParticle)
+					{
+						PrevPositions[0] = Positions[0];
+					}
+				}
+				//
+				// 始点セグメントのCollisionPhase　ここまで
+				// 
+
+				//
+				// 終点セグメントのCollisionPhase　ここから
+				// 
+				else if (ParticleIdx == (Positions.Num() - 1))
+				{
+					// 動いている頂点
+					const FVector& TriVert1 = Positions[ParticleIdx];
+					const FVector& TriVert2 = PrevPositions[ParticleIdx];
+					
+					// 固定している頂点は始点の判定と違ってPrevPositonsでなくPositionsなのに注意。
+					// こうしないと1フレームでParticlesIdxの頂点が大きく動いたとき交差検出が漏れるケースがある
+					// https://www.gdcvault.com/play/1027351/Rope-Simulation-in-Uncharted-4
+					// の32分ごろの例。
+					const FVector& TriVert0 = Positions[ParticleIdx - 1];
+
+					// TODO: 上のifブロックと処理が冗長
+					double NearestEdgeDistanceSq = DBL_MAX;
+					FVector NearestIntersectPoint = FVector::ZeroVector;
+					int32 NearestEdgeIdx = INDEX_NONE;
+					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+					{
+						// 異なるエッジでないものは採用しない
+						if (EdgeIdxOfPositions[ParticleIdx - 1] == EdgeIdx || EdgeIdxOfPositions[ParticleIdx] == EdgeIdx)
+						{
+							continue;
+						}
+
+						const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+						const FVector& RayStart = Edge.Key;
+						const FVector& RayEnd = Edge.Value;
+						FVector IntersectPoint;
+						FVector IntersectNormal;
+						bool bIntersecting = FMath::SegmentTriangleIntersection(RayStart, RayEnd, TriVert0, TriVert1, TriVert2, IntersectPoint, IntersectNormal);
+						if (bIntersecting)
+						{
+							// 既存の動いてない方の頂点と近すぎるものは追加しない。複数エッジの交点と衝突した場合に複数頂点追加しうるので
+							if ((IntersectPoint - TriVert0).SizeSquared() > ToleranceSquared)
+							{
+								// 元の線分と最も近いエッジを採用
+								double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(IntersectPoint, TriVert0, TriVert2);
+								if (EdgeDistanceSq < NearestEdgeDistanceSq)
+								{
+									// 等距離なら最も若いインデックスを採用する
+									NearestEdgeDistanceSq = EdgeDistanceSq;
+									NearestIntersectPoint = IntersectPoint;
+									NearestEdgeIdx = EdgeIdx;
+								}
+							}
+						}
+					}
+
+					if (NearestEdgeIdx != INDEX_NONE)
+					{
+						// TODO:GDC動画のように延長線上を新たな終点におくと、同一平面に複数エッジがある
+						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
+						// Triangleの辺にエッジがある場合に交差を検出失敗する。
+						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
+						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx);
+						Positions.Insert(NearestIntersectPoint, ParticleIdx);
+						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx);
+						MovedFlagOfPositions.Insert(true, ParticleIdx); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
+
+						// MoveHalfwayPositionからPositions[ParticleIdx]の間で動かしてさらに他のエッジ接触がないかチェックする
+						bExistAddedParticle = true;
+					}
+
+					// エッジからはがす削除
+					// TODO:終点と処理が冗長
+					if (Positions.Num() >= 3)
+					{
+						// 0-2の線分の削除だけで判定していないのは、なにかに1をひっかけている状態で
+						// 0-2を大きく動かすと0-2線分上にコリジョンがいない状態になり削除対象になってしまうから
+						// TODO:本当は3つのライントレースでなくTriangleとコリジョンのOverlapをとりたかったがAPIがなかった
+						// TODO:もっといいやり方あるかも
+
+						bool bTraceComplex = false;
+						FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SolveRopeBlockersCollisionConstraint), bTraceComplex);
+						// Toleranceだけ0と2を双方から縮めるのは、どちらかあるいは両方がエッジと接触
+						// していたらそのエッジとヒット判定になり、1の削除判定をしたいのにできないため
+						// TODO:もっといい方法ある？
+						// Toleranceだけ1を0-2の線分側に近づけるのは、1がエッジと接触してると接触判定し続けるため
+						// TODO:もっといい方法ある？
+
+						// 2があまりに1に近いとTriangleにならずに正しい判定ができないのでそういうときは近くないものを探しに行く
+						FVector Position2 = Positions[Positions.Num() - 3];
+						for (int32 i = Positions.Num() - 3; i >= 0; i--)
+						{
+							if ((Positions[i] - Positions[Positions.Num() - 2]).SizeSquared() > ToleranceSquared)
+							{
+								Position2 = Positions[i];
+								break;
+							}
+						}
+
+						const FVector& SmallTriVert0 = Positions[Positions.Num() - 1] + (Position2 - Positions[Positions.Num() - 1]).GetSafeNormal() * Tolerance;
+						const FVector& SmallTriVert1 = Positions[Positions.Num() - 2] + ((Positions[Positions.Num() - 1] + Position2) * 0.5 - Positions[Positions.Num() - 2]).GetSafeNormal() * Tolerance;
+						const FVector& SmallTriVert2 = Position2 + (Positions[Positions.Num() - 1] - Position2).GetSafeNormal() * Tolerance;
+
+						const FVector& SmallTriVertWS0 = GetActorTransform().TransformPosition(SmallTriVert0);
+						const FVector& SmallTriVertWS1 = GetActorTransform().TransformPosition(SmallTriVert1);
+						const FVector& SmallTriVertWS2 = GetActorTransform().TransformPosition(SmallTriVert2);
+
+						bool bIntersectionExist = false;
+						for (UPrimitiveComponent* Primitive : OverlapPrimitives)
+						{
+							FHitResult HitResult;
+							bool bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS0, SmallTriVertWS1, TraceParams);
+							if (bDrawTraceToRemove)
+							{
+								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+								DrawDebugLine(GetWorld(), SmallTriVertWS0, bHit ? HitResult.Location : SmallTriVertWS1, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+								if(bHit)
+								{
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS1, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+								}
+							}
+
+							if (bHit)
+							{
+								bIntersectionExist = true;
+								break;
+							}
+
+							bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS1, SmallTriVertWS2, TraceParams);
+							if (bDrawTraceToRemove)
+							{
+								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+								DrawDebugLine(GetWorld(), SmallTriVertWS1, bHit ? HitResult.Location : SmallTriVertWS2, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+								if(bHit)
+								{
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS2, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+								}
+							}
+
+							if (bHit)
+							{
+								bIntersectionExist = true;
+								break;
+							}
+
+							bHit = Primitive->LineTraceComponent(HitResult, SmallTriVertWS2, SmallTriVertWS0, TraceParams);
+							if (bDrawTraceToRemove)
+							{
+								// UPrimitiveComponent::K2_LineTraceComponent()を参考にしている
+								DrawDebugLine(GetWorld(), SmallTriVertWS2, bHit ? HitResult.Location : SmallTriVertWS0, FColor(255, 128, 0), false, -1.0f, 0, 2.0f);
+								if(bHit)
+								{
+									DrawDebugLine(GetWorld(), HitResult.Location, SmallTriVertWS0, FColor(0, 128, 255), false, -1.0f, 0, 2.0f);
+								}
+							}
+
+							if (bHit)
+							{
+								bIntersectionExist = true;
+								break;
+							}
+						}
+
+						if (!bIntersectionExist)
+						{
+							int32 LastIdx = Positions.Num() - 2;
+							PrevPositions.RemoveAt(LastIdx);
+							Positions.RemoveAt(LastIdx);
+							EdgeIdxOfPositions.RemoveAt(LastIdx);
+							MovedFlagOfPositions.RemoveAt(LastIdx);
+
+							bExistAddedParticle = false;
+						}
+					}
+
+					if (!bExistAddedParticle)
+					{
+						PrevPositions[Positions.Num() - 1] = Positions[Positions.Num() - 1];
+					}
+				}
+				//
+				// 終点セグメントのCollisionPhase　ここまで
+				// 
+
+				//
+				// 始点終点以外のセグメントのCollisionPhase　ここから
+				// 
+				else
+				{
+					// エッジ端に到達した場合
+					// 頂点周辺のエッジの状況を調査し、エッジ移動、頂点追加/削除の判定を行う
+					// TODO:今まで削除は始点と端点側のブロックでTriangleの3つのエッジとPrimitiveの交差判定でやってきたが本来はここでやるべき
+
+					// 頂点を中心としたTolerance半径の球と接触するエッジを収集する
+					TArray<int32> IntersectedEdgeIndices;
+					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
+					{
+						const TPair<FVector, FVector>& Edge = RopeBlockerTriMeshEdgeArray[EdgeIdx];
+						const FVector& EdgeStart = Edge.Key;
+						const FVector& EdgeEnd = Edge.Value;
+
+						double EdgeDistanceSq = NiagaraSandbox::RopeSimulator::PointDistToSegmentSquared(Positions[ParticleIdx], EdgeStart, EdgeEnd);
+						if (EdgeDistanceSq < ToleranceSquared)
+						{
+							IntersectedEdgeIndices.Add(EdgeIdx);
+						}
+					}
+
+					check(IntersectedEdgeIndices.Num());
+					if (IntersectedEdgeIndices.Num() == 1)
+					{
+						// 検出したエッジは現在所属しているエッジであるはず
+						check(IntersectedEdgeIndices[0] == EdgeIdxOfPositions[ParticleIdx]);
+						// メッシュとしてエッジ端に他のエッジが全く接してないのは許容できない
+						check(false);
+					}
+					else if (IntersectedEdgeIndices.Num() > 1)
+					{
+						// エッジのペア配列を作る
+						TArray<TPair<int32, int32>> EdgePairs;
+						EdgePairs.SetNum(IntersectedEdgeIndices.Num() * (IntersectedEdgeIndices.Num() - 1) / 2); // n_C_2
+
+						for (int32 EdgeIdx = 0, PairIdx = 0; EdgeIdx < IntersectedEdgeIndices.Num() - 1; EdgeIdx++)
+						{
+							for (int32 AnotherEdgeIdx = EdgeIdx + 1; AnotherEdgeIdx < IntersectedEdgeIndices.Num(); AnotherEdgeIdx++)
+							{
+								EdgePairs[PairIdx] = TPair<int32, int32>(IntersectedEdgeIndices[EdgeIdx], IntersectedEdgeIndices[AnotherEdgeIdx]);
+								PairIdx++;
+							}
+						}
+
+						// 頂点マージが発生するようなときは頂点間の距離がTolerance以下でも方向が正確に得られないと
+						// 正確なエッジ移動先は求まらないのでここはTolerance以下のものを使う
+						//const FVector& PreSegmentDir = (Positions[ParticleIdx] - Positions[ParticleIdx - 1]).GetSafeNormal(Tolerance);
+						FVector PreSegmentDir = (Positions[ParticleIdx] - Positions[ParticleIdx - 1]);
+						double PreSegmentDirLen = PreSegmentDir.Size();
+						if (PreSegmentDirLen < UE_KINDA_SMALL_NUMBER)
+						{
+							PreSegmentDir = FVector::ZeroVector;
+						}
+						else
+						{
+							PreSegmentDir /= PreSegmentDirLen;
+						}
+						//const FVector& PostSegmentDir = (Positions[ParticleIdx + 1] - Positions[ParticleIdx]).GetSafeNormal(Tolerance);
+						FVector PostSegmentDir = (Positions[ParticleIdx + 1] - Positions[ParticleIdx]);
+						double PostSegmentDirLen = PostSegmentDir.Size();
+						if (PostSegmentDirLen < UE_KINDA_SMALL_NUMBER)
+						{
+							PostSegmentDir = FVector::ZeroVector;
+						}
+						else
+						{
+							PostSegmentDir /= PostSegmentDirLen;
+						}
+
+						const FVector& TensionDir = (-PreSegmentDir + PostSegmentDir).GetSafeNormal(Tolerance);
+
+						enum class CornerType : uint8
+						{
+							InnerCorner = 0,
+							UnstableCorner,
+							SideEdge,
+							OuterCorner,
+						};
+
+						// エッジペアごとのコーナータイプ情報
+						TArray<CornerType> CornerTypes;
+						CornerTypes.SetNum(EdgePairs.Num());
+
+						// エッジペアごとのコーナータイプ情報に付加するエッジインデックス情報
+						TArray<int32> CornerEdgeIdxInfos;
+						CornerEdgeIdxInfos.SetNum(EdgePairs.Num());
+
+						// TODO:後で判定必要？
+						//check(ParticleNormal != FVector::ZAxisVector);
+
+						// エッジペアごとのコーナー情報テーブルを作成
+						for (int32 PairIdx = 0; PairIdx < EdgePairs.Num(); PairIdx++)
+						{
+							const TPair<int32, int32>& EdgePair = EdgePairs[PairIdx];
+							int32 EdgeIdxA = EdgePair.Key;
+							int32 EdgeIdxB = EdgePair.Value;
+
+							TPair<FVector, FVector> EdgeA = RopeBlockerTriMeshEdgeArray[EdgeIdxA];
+							TPair<FVector, FVector> EdgeB = RopeBlockerTriMeshEdgeArray[EdgeIdxB];
+
+							// エッジの片方が長さがToleranceより小さければSideEdgeにしてそちらをIgnoreにする
+							if ((EdgeA.Key - EdgeA.Value).SizeSquared() < ToleranceSquared)
+							{
+								CornerTypes[PairIdx] = CornerType::SideEdge;
+								// IgnoreA
+								CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+								continue;
+							}
+							if ((EdgeB.Key - EdgeB.Value).SizeSquared() < ToleranceSquared)
+							{
+								CornerTypes[PairIdx] = CornerType::SideEdge;
+								// IgnoreB
+								CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+								continue;
+							}
+
+							// エッジは交点（ここでは頂点が交点のTolerance範囲の近傍んあるとして頂点で代用）から伸びる方向を前方向としておく
+							// Valueの方が交点から遠い方とする
+							if ((EdgeA.Key - Positions[ParticleIdx]).SizeSquared() > (EdgeA.Value - Positions[ParticleIdx]).SizeSquared())
+							{
+								FVector SwapTmp = EdgeA.Value;
+								EdgeA.Value = EdgeA.Key;
+								EdgeA.Key = SwapTmp;
+							}
+							if ((EdgeB.Key - Positions[ParticleIdx]).SizeSquared() > (EdgeB.Value - Positions[ParticleIdx]).SizeSquared())
+							{
+								FVector SwapTmp = EdgeB.Value;
+								EdgeB.Value = EdgeB.Key;
+								EdgeB.Key = SwapTmp;
+							}
+
+							const FVector& EdgeADir = (EdgeA.Value - EdgeA.Key).GetSafeNormal(Tolerance);
+							const FVector& EdgeBDir = (EdgeB.Value - EdgeB.Key).GetSafeNormal(Tolerance);
+
+							// エッジペア平面と張力方向から各エッジペアのコーナー情報を求める
+							if (FVector::Coincident(EdgeADir, EdgeBDir)) // エッジが0度。閉じたくさび。//TODO:ToleranceはFVector::Coincidentのデフォルト任せ
+							{
+								CornerTypes[PairIdx] = CornerType::InnerCorner;
+								// TODO:Stableの場合、所属エッジがイテレーションごとに入れ替わる可能性があり、不安定になりそうだが？
+
+								// DotProductの差はごく小さいが、それで比較して振り分ける
+								if (FVector::DotProduct(TensionDir, EdgeADir) > FVector::DotProduct(TensionDir, EdgeBDir))
+								{
+									// MoveAlongA or StableCorner
+									CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+								}
+								else
+								{
+									// MoveAlongB or StableCorner
+									CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+								}
+							}
+							else if (FVector::Coincident(-EdgeADir, EdgeBDir)) // エッジが180度。//TODO:ToleranceはFVector::Coincidentのデフォルト任せ
+							{
+								// InnerCornerでもUnstableCornerでもいいのだが少なくともInnerCorner::StableCornerではないのでUnstableCornerにしておく
+								CornerTypes[PairIdx] = CornerType::UnstableCorner;
+
+								if (FVector::DotProduct(TensionDir, EdgeADir) > FVector::DotProduct(TensionDir, EdgeBDir))
+								{
+									// MoveAlongA
+									CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+								}
+								else
+								{
+									// MoveAlongB
+									CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+								}
+							}
+							else // エッジペア平面が成立するケース
+							{
+								check((EdgeA.Key - EdgeA.Value).SizeSquared() >= ToleranceSquared);
+								check((EdgeB.Key - EdgeB.Value).SizeSquared() >= ToleranceSquared);
+
+								// GetUnsafeNormal()にしているが、EdgeADirとEdgeBDirが0なケースや平行なケースは分岐済み
+								const FVector& TwoEdgePlaneNormal = FVector::CrossProduct(EdgeADir, EdgeBDir).GetUnsafeNormal();
+
+								const FVector& TensionDirProjected = FVector::VectorPlaneProject(TensionDir, TwoEdgePlaneNormal);
+
+								// 前セグメントと後セグメントが、エッジAとエッジBがなす平面を、両方表あるいは裏から
+								// 貫通しているか、表裏逆方向に貫通しているかを判定する
+								double DotProductPre = FVector::DotProduct(PreSegmentDir, TwoEdgePlaneNormal);
+								double DotProductPost = FVector::DotProduct(PostSegmentDir, TwoEdgePlaneNormal);
+								if ((DotProductPre > 0 && DotProductPost > 0)
+									|| (DotProductPre < 0 && DotProductPost < 0)) // 両方表あるいは両方裏から貫通している
+								{
+									const FVector& CrossProductWithEdgeA = FVector::CrossProduct(TensionDirProjected, EdgeADir);
+									const FVector& CrossProductWithEdgeB = FVector::CrossProduct(TensionDirProjected, EdgeBDir);
+
+									// 頂点での折れ曲がりの法線がエッジAとエッジBの区分する4領域のどちら方向にあるかをチェックする
+									double DotProductA = FVector::DotProduct(CrossProductWithEdgeA, TwoEdgePlaneNormal);
+									double DotProductB = FVector::DotProduct(CrossProductWithEdgeB, TwoEdgePlaneNormal);
+
+									if (DotProductA < 0)
+									{
+										if (DotProductB < 0)
+										{
+											CornerTypes[PairIdx] = CornerType::SideEdge;
+											// IgnoreB
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
+										else // DotProductB >= 0
+										{
+											CornerTypes[PairIdx] = CornerType::UnstableCorner;
+											// TODO:これはMovementPhaseでの動きから判定が必要
+
+											// TODO:実装が冗長
+											if (FVector::DotProduct(TensionDirProjected, EdgeADir) > FVector::DotProduct(TensionDirProjected, EdgeBDir))
+											{
+												// MoveAlongA
+												CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+											}
+											else
+											{
+												// MoveAlongB
+												CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+											}
+										}
+									}
+									else // DotProductA >= 0
+									{
+										if (DotProductB < 0)
+										{
+											CornerTypes[PairIdx] = CornerType::InnerCorner;
+
+											// TODO:実装が冗長
+											if (FVector::DotProduct(TensionDirProjected, EdgeADir) > FVector::DotProduct(TensionDirProjected, EdgeBDir))
+											{
+												// MoveAlongA or StableCorner
+												CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+											}
+											else
+											{
+												// MoveAlongB or StableCorner
+												CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+											}
+										}
+										else // DotProductB >= 0
+										{
+											CornerTypes[PairIdx] = CornerType::SideEdge;
+											// IgnoreA
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+									}
+								}
+								else // 表裏逆方向に貫通している。あるいは片方が平面上にある
+								{
+									//TODO: OuterCornerのくさびから交点に収束して2頂点をマージするケースも実装してない
+									// PreSegmentは交点に向かう方向なのでわかりやすいように交点から出ていく方向になるようにマイナスをかける
+									const FVector& PreSegmentProjected = FVector::VectorPlaneProject(-PreSegmentDir, TwoEdgePlaneNormal);
+
+									const FVector& PreSegmentCrossProductWithEdgeA = FVector::CrossProduct(PreSegmentProjected, EdgeADir);
+									const FVector& PreSegmentCrossProductWithEdgeB = FVector::CrossProduct(PreSegmentProjected, EdgeBDir);
+
+									// 前のセグメントがエッジAとエッジBのなす平面の4領域のどれを通るかを判定する内積
+									double PreSegmentDotProductA = FVector::DotProduct(PreSegmentCrossProductWithEdgeA, TwoEdgePlaneNormal);
+									double PreSegmentDotProductB = FVector::DotProduct(PreSegmentCrossProductWithEdgeB, TwoEdgePlaneNormal);
+
+									const FVector& PostSegmentProjected = FVector::VectorPlaneProject(PostSegmentDir, TwoEdgePlaneNormal);
+
+									const FVector& PostSegmentCrossProductWithEdgeA = FVector::CrossProduct(PostSegmentProjected, EdgeADir);
+									const FVector& PostSegmentCrossProductWithEdgeB = FVector::CrossProduct(PostSegmentProjected, EdgeBDir);
+
+									// 前のセグメントがエッジAとエッジBのなす平面の4領域のどれを通るかを判定する内積
+									double PostSegmentDotProductA = FVector::DotProduct(PostSegmentCrossProductWithEdgeA, TwoEdgePlaneNormal);
+									double PostSegmentDotProductB = FVector::DotProduct(PostSegmentCrossProductWithEdgeB, TwoEdgePlaneNormal);
+
+									if (PreSegmentDotProductA < 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB < 0)
+									{
+										CornerTypes[PairIdx] = CornerType::UnstableCorner;
+										// MoveAlongB
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+									}
+									else if (PreSegmentDotProductA < 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB >= 0)
+									{
+										CornerTypes[PairIdx] = CornerType::UnstableCorner;
+										// MoveAlongB
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+									}
+									else if (PreSegmentDotProductA < 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA >= 0 && PostSegmentDotProductB < 0)
+									{
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+										// TODO:実装が冗長
+										if (FVector::DotProduct(TensionDirProjected, EdgeADir) >= FVector::DotProduct(TensionDirProjected, EdgeBDir))
+										{
+											// MoveAlongA or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else
+										{
+											// MoveAlongB or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
+									}
+									else if (PreSegmentDotProductA < 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA >= 0 && PostSegmentDotProductB >= 0)
+									{
+										CornerTypes[PairIdx] = CornerType::OuterCorner;
+										// CrossesBThenA
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+									}
+
+									else if (PreSegmentDotProductA < 0 && PreSegmentDotProductB >= 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB < 0)
+									{
+										CornerTypes[PairIdx] = CornerType::UnstableCorner;
+										// MoveAlongB
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+									}
+									else if (PreSegmentDotProductA < 0 && PreSegmentDotProductB >= 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB >= 0)
+									{
+										CornerTypes[PairIdx] = CornerType::UnstableCorner;
+										// TODO:実装が冗長
+										if (FVector::DotProduct(TensionDirProjected, EdgeADir) >= FVector::DotProduct(TensionDirProjected, EdgeBDir))
+										{
+											// MoveAlongA
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else
+										{
+											// MoveAlongB
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
+									}
+									else if (PreSegmentDotProductA < 0 && PreSegmentDotProductB >= 0 && PostSegmentDotProductA >= 0 && PostSegmentDotProductB < 0)
+									{
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+
+										// TODO:実装が冗長
+										if (FVector::DotProduct(TensionDirProjected, EdgeADir) >= FVector::DotProduct(TensionDirProjected, EdgeBDir))
+										{
+											// MoveAlongA or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else
+										{
+											// MoveAlongB or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
+									}
+									else if (PreSegmentDotProductA < 0 && PreSegmentDotProductB >= 0 && PostSegmentDotProductA >= 0 && PostSegmentDotProductB >= 0)
+									{
+										CornerTypes[PairIdx] = CornerType::UnstableCorner;
+										// MoveAlongA
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+									}
+
+									else if (PreSegmentDotProductA >= 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB < 0)
+									{
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+										// TODO:実装が冗長
+										if (FVector::DotProduct(TensionDirProjected, EdgeADir) >= FVector::DotProduct(TensionDirProjected, EdgeBDir))
+										{
+											// MoveAlongA or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else
+										{
+											// MoveAlongB or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
+									}
+									else if (PreSegmentDotProductA >= 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB >= 0)
+									{
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+										// TODO:実装が冗長
+										if (FVector::DotProduct(TensionDirProjected, EdgeADir) >= FVector::DotProduct(TensionDirProjected, EdgeBDir))
+										{
+											// MoveAlongA or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else
+										{
+											// MoveAlongB or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
+									}
+									else if (PreSegmentDotProductA >= 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA >= 0 && PostSegmentDotProductB < 0)
+									{
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+										// TODO:実装が冗長
+										if (FVector::DotProduct(TensionDirProjected, EdgeADir) >= FVector::DotProduct(TensionDirProjected, EdgeBDir))
+										{
+											// MoveAlongA or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else
+										{
+											// MoveAlongB or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
+									}
+									else if (PreSegmentDotProductA >= 0 && PreSegmentDotProductB < 0 && PostSegmentDotProductA >= 0 && PostSegmentDotProductB >= 0)
+									{
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+										// TODO:実装が冗長
+										if (FVector::DotProduct(TensionDirProjected, EdgeADir) >= FVector::DotProduct(TensionDirProjected, EdgeBDir))
+										{
+											// MoveAlongA or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else
+										{
+											// MoveAlongB or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
+									}
+
+									else if (PreSegmentDotProductA >= 0 && PreSegmentDotProductB >= 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB < 0)
+									{
+										CornerTypes[PairIdx] = CornerType::OuterCorner;
+										// CrossesAThenB
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+									}
+									else if (PreSegmentDotProductA >= 0 && PreSegmentDotProductB >= 0 && PostSegmentDotProductA < 0 && PostSegmentDotProductB >= 0)
+									{
+										CornerTypes[PairIdx] = CornerType::UnstableCorner;
+										// MoveAlongA
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+									}
+									else if (PreSegmentDotProductA >= 0 && PreSegmentDotProductB >= 0 && PostSegmentDotProductA >= 0 && PostSegmentDotProductB < 0)
+									{
+										CornerTypes[PairIdx] = CornerType::InnerCorner;
+										// TODO:実装が冗長
+										if (FVector::DotProduct(TensionDirProjected, EdgeADir) >= FVector::DotProduct(TensionDirProjected, EdgeBDir))
+										{
+											// MoveAlongA or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+										}
+										else
+										{
+											// MoveAlongB or StableCorner
+											CornerEdgeIdxInfos[PairIdx] = EdgeIdxB;
+										}
+									}
+									else if (PreSegmentDotProductA >= 0 && PreSegmentDotProductB >= 0 && PostSegmentDotProductA >= 0 && PostSegmentDotProductB >= 0)
+									{
+										CornerTypes[PairIdx] = CornerType::UnstableCorner;
+										// MoveAlongA
+										CornerEdgeIdxInfos[PairIdx] = EdgeIdxA;
+									}
+									else
+									{
+										check(false);
+									}
+								}
+							}
+						} // コーナー情報テーブル作成ループ
+
+						// コーナー情報作成テーブルからSideEdgeのIgnoreにいずれかの要素で一つでもなっているエッジを洗い出す
+						TArray<int32> IgnoreIndices;
+
+						for (int32 PairIdx = 0; PairIdx < EdgePairs.Num(); PairIdx++)
+						{
+							if (CornerTypes[PairIdx] == CornerType::SideEdge)
+							{
+								IgnoreIndices.AddUnique(CornerEdgeIdxInfos[PairIdx]);
+							}
+						}
+
+						// コーナー情報作成テーブルでエッジがSideEdgeに全くなってないペアで、InnerCornerかOuterCornerのみを移動候補のペアとする
+						TArray<int32> CandidatesPairIndices;
+						for (int32 PairIdx = 0; PairIdx < EdgePairs.Num(); PairIdx++)
+						{
+							if (IgnoreIndices.Find(EdgePairs[PairIdx].Key) != INDEX_NONE)
+							{
+								continue;
+							}
+
+							if (IgnoreIndices.Find(EdgePairs[PairIdx].Value) != INDEX_NONE)
+							{
+								continue;
+							}
+
+							if (CornerTypes[PairIdx] == CornerType::InnerCorner || CornerTypes[PairIdx] == CornerType::UnstableCorner)
+							{
+								CandidatesPairIndices.Add(PairIdx);
+							}
+						}
+
+						// 候補の中からMoveAlong先が張力的にもっともひっかかるエッジを移動先として採用。
+						int32 MoveTargetEdgeIdx = INDEX_NONE;
+						double MaxDotProduct = -DBL_MAX;
+						for (int32 PairIdx : CandidatesPairIndices)
+						{
+							int32 MoveAlongEdgeIdx = CornerEdgeIdxInfos[PairIdx];
+							TPair<FVector, FVector> CandidateEdge = RopeBlockerTriMeshEdgeArray[MoveAlongEdgeIdx];
+
+							// エッジは交点（ここでは頂点が交点のTolerance範囲の近傍んあるとして頂点で代用）から伸びる方向を前方向としておく
+							// Valueの方が交点から遠い方とする
+							if ((CandidateEdge.Key - Positions[ParticleIdx]).SizeSquared() > (CandidateEdge.Value - Positions[ParticleIdx]).SizeSquared())
+							{
+								FVector SwapTmp = CandidateEdge.Value;
+								CandidateEdge.Value = CandidateEdge.Key;
+								CandidateEdge.Key = SwapTmp;
+							}
+
+							double DotProduct = FVector::DotProduct((CandidateEdge.Value - CandidateEdge.Key).GetSafeNormal(), -TensionDir);
+							if (DotProduct > MaxDotProduct)
+							{
+								MaxDotProduct = DotProduct;
+								MoveTargetEdgeIdx = MoveAlongEdgeIdx;
+							}
+						}
+
+						if (MoveTargetEdgeIdx != INDEX_NONE)
+						{
+							//TODO: 本来は再帰的検索が必要だが一旦テストのため
+							TArray<int32> OuterCornerEdges;
+							for (int32 PairIdx = 0; PairIdx < EdgePairs.Num(); PairIdx++)
+							{
+								if (CornerTypes[PairIdx] == CornerType::OuterCorner
+									&& ((EdgePairs[PairIdx].Key == MoveTargetEdgeIdx) || (EdgePairs[PairIdx].Value == MoveTargetEdgeIdx)))
+								{
+									// Crossしている順番にソート
+									if (CornerEdgeIdxInfos[PairIdx] == EdgePairs[PairIdx].Key)
+									{
+										OuterCornerEdges.AddUnique(EdgePairs[PairIdx].Key);
+										OuterCornerEdges.AddUnique(EdgePairs[PairIdx].Value);
+									}
+									else
+									{
+										OuterCornerEdges.AddUnique(EdgePairs[PairIdx].Value);
+										OuterCornerEdges.AddUnique(EdgePairs[PairIdx].Key);
+									}
+								}
+							}
+
+							if (OuterCornerEdges.IsEmpty())
+							{
+								// エッジ移動先に選ばれたエッジにOuterCornerがなければ、そのままエッジ移動
+								EdgeIdxOfPositions[ParticleIdx] = MoveTargetEdgeIdx;
+								MovedFlagOfPositions[ParticleIdx] = true;
+							}
+							else
+							{
+								//TODO: もしConcaveになっているOuterCornerエッジを頂点追加したとしても、MovedFlagOfPositionsは
+								//立てるので、次のイテレーションで頂点削除される想定
+								//TODO: ここはConvex検出で頂点追加するアイディアもあるが、Convex検出するには先にMovementPhaseを
+								//経て交差点から移動しておく必要があり、そうすると大きく動くと結構めりこみうるのでConvex検出でも
+								//検出できない恐れはある
+
+								// TODO:OuterCornerEdges内のソートが必要
+								check(OuterCornerEdges.Num() >= 2);
+								EdgeIdxOfPositions[ParticleIdx] = OuterCornerEdges[0];
+								MovedFlagOfPositions[ParticleIdx] = true;
+
+								for (int32 i = 1; i < OuterCornerEdges.Num(); i++)
+								{
+									PrevPositions.Insert(Positions[ParticleIdx], ParticleIdx + i);
+									// PositionsにPositionsの要素をInsertするとTArrayの内部でチェックにひっかかるので
+									Positions.Insert(FVector(Positions[ParticleIdx]), ParticleIdx + i); 
+									EdgeIdxOfPositions.Insert(OuterCornerEdges[i], ParticleIdx + i);
+									MovedFlagOfPositions.Insert(true, ParticleIdx + i); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
+								}
+
+								bExistAddedParticle = true;
+							}
+						}
+						// TODO: MoveTargetEdgeIdx == INDEX_NONEは、すべてがSideEdgeで次に頂点が削除されるようなケースでありうる
+						// TODO: 頂点削除は始点終点のセグメントは今のやり方でもいいが、本来はConvex検出でやるべき？コリジョン側が
+						// 動くケースも考慮必要
+
+
+						// TODO:移動先エッジにつらなるOuterCornerがエッジペアにあれば、それも移動先として採用。
+					}
+				}
+				//
+				// 始点終点以外のセグメントのCollisionPhase　ここまで
+				// 
+			}
+			//
+			// CollisionPhase　ここまで
+			//
+
+			else // bNeedCollisionPhaseがflaseのときの処理
+			{
+				check(!bExistAddedParticle);
+				PrevPositions[ParticleIdx] = Positions[ParticleIdx];
+			}
+		}
+		//
+		// パーティクルループ　ここまで
+		//
+
+		//
+		// イテレーション早期打ち切りのための動いた頂点があるかどうかの判定
+		//
+		bExistMovedParticle = false;
+		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num() - 1; ParticleIdx++)
+		{
+			if (MovedFlagOfPositions[ParticleIdx])
+			{
+				bExistMovedParticle = true;
+				break;
+			}
+		}
+	}
+	//
+	// イテレーションループ　ここまで
+	//
 }
 
 ATautRopeSimulatorCPU::ATautRopeSimulatorCPU()
