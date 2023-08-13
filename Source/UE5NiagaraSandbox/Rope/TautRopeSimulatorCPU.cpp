@@ -1482,8 +1482,6 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						Positions.Insert(NearestIntersectPoint, ParticleIdx);
 						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx);
 						MovedFlagOfPositions.Insert(true, ParticleIdx); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
-
-						// MoveHalfwayPositionからPositions[ParticleIdx]の間で動かしてさらに他のエッジ接触がないかチェックする
 						bExistAddedParticle = true;
 					}
 
@@ -2130,9 +2128,24 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 							if (OuterCornerEdges.IsEmpty())
 							{
-								// エッジ移動先に選ばれたエッジにOuterCornerがなければ、そのままエッジ移動
-								EdgeIdxOfPositions[ParticleIdx] = MoveTargetEdgeIdx;
-								MovedFlagOfPositions[ParticleIdx] = true;
+								if (EdgeIdxOfPositions[ParticleIdx - 1] == MoveTargetEdgeIdx
+									|| EdgeIdxOfPositions[ParticleIdx + 1] == MoveTargetEdgeIdx)
+								{
+									// エッジ移動先を前の頂点かあとの頂点が占めていれば削除
+									PrevPositions.RemoveAt(ParticleIdx);
+									Positions.RemoveAt(ParticleIdx);
+									EdgeIdxOfPositions.RemoveAt(ParticleIdx);
+									MovedFlagOfPositions.RemoveAt(ParticleIdx);
+
+									// TODO:同じParticleIdxでループしたいからだが、変数名変えよう
+									bExistAddedParticle = true;
+								}
+								else
+								{
+									// エッジ移動先に選ばれたエッジにOuterCornerがなければ、そのままエッジ移動
+									EdgeIdxOfPositions[ParticleIdx] = MoveTargetEdgeIdx;
+									MovedFlagOfPositions[ParticleIdx] = true;
+								}
 							}
 							else
 							{
@@ -2142,21 +2155,43 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 								//経て交差点から移動しておく必要があり、そうすると大きく動くと結構めりこみうるのでConvex検出でも
 								//検出できない恐れはある
 
-								// TODO:OuterCornerEdges内のソートが必要
+								// TODO:OuterCornerEdges内のソートが必要。現状の実装で正確に動作するのはOuterCornerがひとつのときだけ
 								check(OuterCornerEdges.Num() >= 2);
-								EdgeIdxOfPositions[ParticleIdx] = OuterCornerEdges[0];
-								MovedFlagOfPositions[ParticleIdx] = true;
+
+								int32 PreParticleEdgeIdx = EdgeIdxOfPositions[ParticleIdx - 1];
+								int32 PostParticleEdgeIdx = EdgeIdxOfPositions[ParticleIdx + 1];
+								if (PreParticleEdgeIdx == OuterCornerEdges[0]
+									|| PostParticleEdgeIdx == OuterCornerEdges[0]) //TODO:こんな分岐で処理するのも雑。仮実装。
+								{
+									// エッジ移動先を前の頂点かあとの頂点が占めていれば削除
+									PrevPositions.RemoveAt(ParticleIdx);
+									Positions.RemoveAt(ParticleIdx);
+									EdgeIdxOfPositions.RemoveAt(ParticleIdx);
+									MovedFlagOfPositions.RemoveAt(ParticleIdx);
+
+									// TODO:同じParticleIdxでループしたいからだが、変数名変えよう
+									bExistAddedParticle = true;
+								}
+								else
+								{
+									EdgeIdxOfPositions[ParticleIdx] = OuterCornerEdges[0];
+									MovedFlagOfPositions[ParticleIdx] = true;
+								}
 
 								for (int32 i = 1; i < OuterCornerEdges.Num(); i++)
 								{
-									PrevPositions.Insert(Positions[ParticleIdx], ParticleIdx + i);
-									// PositionsにPositionsの要素をInsertするとTArrayの内部でチェックにひっかかるので
-									Positions.Insert(FVector(Positions[ParticleIdx]), ParticleIdx + i); 
-									EdgeIdxOfPositions.Insert(OuterCornerEdges[i], ParticleIdx + i);
-									MovedFlagOfPositions.Insert(true, ParticleIdx + i); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
-								}
+									if (PreParticleEdgeIdx != OuterCornerEdges[i]
+										&& PostParticleEdgeIdx != OuterCornerEdges[i]) //TODO:こんな分岐で処理するのも雑。仮実装。
+									{
+										PrevPositions.Insert(Positions[ParticleIdx], ParticleIdx + i);
+										// PositionsにPositionsの要素をInsertするとTArrayの内部でチェックにひっかかるので
+										Positions.Insert(FVector(Positions[ParticleIdx]), ParticleIdx + i); 
+										EdgeIdxOfPositions.Insert(OuterCornerEdges[i], ParticleIdx + i);
+										MovedFlagOfPositions.Insert(true, ParticleIdx + i); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
 
-								bExistAddedParticle = true;
+										bExistAddedParticle = true;
+									}
+								}
 							}
 						}
 						// TODO: MoveTargetEdgeIdx == INDEX_NONEは、すべてがSideEdgeで次に頂点が削除されるようなケースでありうる
