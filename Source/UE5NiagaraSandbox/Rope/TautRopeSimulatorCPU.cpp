@@ -1134,7 +1134,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 		// パーティクルループ　ここから
 		//
 		// TODO: 逆方向ループはあとで必要か検討する
-		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx = (bParticleIdxLoopAgain && (ParticleIdx != Positions.Num() - 1)) ? ParticleIdx : ParticleIdx + 1) // 終点だったとき以外、頂点追加があったらもう一度そこから行う
+		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx = bParticleIdxLoopAgain ? ParticleIdx : ParticleIdx + 1)
 		{
 			bool bNeedCollisionPhase = false;
 			MovedFlagOfPositions[ParticleIdx] = false;
