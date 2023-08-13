@@ -1128,13 +1128,13 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 	//
 	for (int32 IterCount = 0; IterCount < MaxIteration && bExistMovedParticle; IterCount++)
 	{
-		bool bExistAddedParticle = false;
+		bool bParticleIdxLoopAgain = false;
 
 		//
 		// パーティクルループ　ここから
 		//
 		// TODO: 逆方向ループはあとで必要か検討する
-		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx = (bExistAddedParticle && (ParticleIdx != Positions.Num() - 1)) ? ParticleIdx : ParticleIdx + 1) // 終点だったとき以外、頂点追加があったらもう一度そこから行う
+		for (int32 ParticleIdx = 0; ParticleIdx < Positions.Num(); ParticleIdx = (bParticleIdxLoopAgain && (ParticleIdx != Positions.Num() - 1)) ? ParticleIdx : ParticleIdx + 1) // 終点だったとき以外、頂点追加があったらもう一度そこから行う
 		{
 			bool bNeedCollisionPhase = false;
 			MovedFlagOfPositions[ParticleIdx] = false;
@@ -1236,7 +1236,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 			//
 
 			// 追加頂点があると始点終点はその延長までしか動かさず再度MovementPhaseをやるので延長位置を保存する
-			bExistAddedParticle = false;
+			bParticleIdxLoopAgain = false;
 
 			//
 			// CollisionPhase　ここから
@@ -1303,8 +1303,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
 						MovedFlagOfPositions.Insert(true, ParticleIdx + 1); // ここでtrueにしてもパーティクルループの自分の番のMovementPhaseで別途判定される
 
-						// MoveHalfwayPositionからPositions[ParticleIdx]の間で動かしてさらに他のエッジ接触がないかチェックする
-						bExistAddedParticle = true;
+						bParticleIdxLoopAgain = true;
 					}
 
 					// エッジからはがす削除
@@ -1408,11 +1407,11 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 							// 追加したものが即削除された場合ももう追加判定はとめて次のパーティクルに進む。
 							// 追加と即削除を繰り返すとParticleIdx=0のままでループが進まないので。
-							bExistAddedParticle = false;
+							bParticleIdxLoopAgain = false;
 						}
 					}
 
-					if (!bExistAddedParticle)
+					if (!bParticleIdxLoopAgain)
 					{
 						PrevPositions[0] = Positions[0];
 					}
@@ -1482,7 +1481,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						Positions.Insert(NearestIntersectPoint, ParticleIdx);
 						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx);
 						MovedFlagOfPositions.Insert(true, ParticleIdx); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
-						bExistAddedParticle = true;
+						bParticleIdxLoopAgain = true;
 					}
 
 					// エッジからはがす削除
@@ -1585,11 +1584,11 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 							EdgeIdxOfPositions.RemoveAt(LastIdx);
 							MovedFlagOfPositions.RemoveAt(LastIdx);
 
-							bExistAddedParticle = false;
+							bParticleIdxLoopAgain = false;
 						}
 					}
 
-					if (!bExistAddedParticle)
+					if (!bParticleIdxLoopAgain)
 					{
 						PrevPositions[Positions.Num() - 1] = Positions[Positions.Num() - 1];
 					}
@@ -2138,13 +2137,15 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 									MovedFlagOfPositions.RemoveAt(ParticleIdx);
 
 									// TODO:同じParticleIdxでループしたいからだが、変数名変えよう
-									bExistAddedParticle = true;
+									bParticleIdxLoopAgain = true;
 								}
 								else
 								{
 									// エッジ移動先に選ばれたエッジにOuterCornerがなければ、そのままエッジ移動
 									EdgeIdxOfPositions[ParticleIdx] = MoveTargetEdgeIdx;
 									MovedFlagOfPositions[ParticleIdx] = true;
+
+									PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 								}
 							}
 							else
@@ -2170,12 +2171,14 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 									MovedFlagOfPositions.RemoveAt(ParticleIdx);
 
 									// TODO:同じParticleIdxでループしたいからだが、変数名変えよう
-									bExistAddedParticle = true;
+									bParticleIdxLoopAgain = true;
 								}
 								else
 								{
 									EdgeIdxOfPositions[ParticleIdx] = OuterCornerEdges[0];
 									MovedFlagOfPositions[ParticleIdx] = true;
+
+									PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 								}
 
 								for (int32 i = 1; i < OuterCornerEdges.Num(); i++)
@@ -2189,10 +2192,14 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 										EdgeIdxOfPositions.Insert(OuterCornerEdges[i], ParticleIdx + i);
 										MovedFlagOfPositions.Insert(true, ParticleIdx + i); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
 
-										bExistAddedParticle = true;
+										bParticleIdxLoopAgain = true;
 									}
 								}
 							}
+						}
+						else // MoveTargetEdgeIdx == INDEX_NONE
+						{
+							PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 						}
 						// TODO: MoveTargetEdgeIdx == INDEX_NONEは、すべてがSideEdgeで次に頂点が削除されるようなケースでありうる
 						// TODO: 頂点削除は始点終点のセグメントは今のやり方でもいいが、本来はConvex検出でやるべき？コリジョン側が
@@ -2212,7 +2219,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 			else // bNeedCollisionPhaseがflaseのときの処理
 			{
-				check(!bExistAddedParticle);
+				check(!bParticleIdxLoopAgain);
 				PrevPositions[ParticleIdx] = Positions[ParticleIdx];
 			}
 		}
