@@ -1477,10 +1477,11 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
 						// Triangleの辺にエッジがある場合に交差を検出失敗する。
 						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
-						PrevPositions.Insert(NearestIntersectPoint, Positions.Num() - 1);
-						Positions.Insert(NearestIntersectPoint, Positions.Num() - 1);
-						EdgeIdxOfPositions.Insert(NearestEdgeIdx, Positions.Num() - 1);
-						MovedFlagOfPositions.Insert(true, Positions.Num() - 1); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
+						int32 InsertIdx = Positions.Num() - 1;
+						PrevPositions.Insert(NearestIntersectPoint, InsertIdx);
+						Positions.Insert(NearestIntersectPoint, InsertIdx);
+						EdgeIdxOfPositions.Insert(NearestEdgeIdx, InsertIdx);
+						MovedFlagOfPositions.Insert(true, InsertIdx); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
 						bParticleIdxLoopAgain = true;
 					}
 
@@ -1578,11 +1579,11 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 
 						if (!bIntersectionExist)
 						{
-							int32 LastIdx = Positions.Num() - 2;
-							PrevPositions.RemoveAt(LastIdx);
-							Positions.RemoveAt(LastIdx);
-							EdgeIdxOfPositions.RemoveAt(LastIdx);
-							MovedFlagOfPositions.RemoveAt(LastIdx);
+							int32 RemoveIdx = Positions.Num() - 2;
+							PrevPositions.RemoveAt(RemoveIdx);
+							Positions.RemoveAt(RemoveIdx);
+							EdgeIdxOfPositions.RemoveAt(RemoveIdx);
+							MovedFlagOfPositions.RemoveAt(RemoveIdx);
 
 							bParticleIdxLoopAgain = false;
 						}
