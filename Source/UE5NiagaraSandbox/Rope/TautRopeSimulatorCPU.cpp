@@ -1252,9 +1252,9 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				if (ParticleIdx == 0)
 				{
 					// 動いている頂点
-					const FVector& TriVert0 = PrevPositions[ParticleIdx];
-					const FVector& TriVert1 = Positions[ParticleIdx];
-					const FVector& TriVert2 = PrevPositions[ParticleIdx + 1];
+					const FVector& TriVert0 = PrevPositions[0];
+					const FVector& TriVert1 = Positions[0];
+					const FVector& TriVert2 = PrevPositions[1];
 
 					double NearestEdgeDistanceSq = DBL_MAX;
 					FVector NearestIntersectPoint = FVector::ZeroVector;
@@ -1262,7 +1262,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 					{
 						// 異なるエッジでないものは採用しない
-						if (EdgeIdxOfPositions[ParticleIdx] == EdgeIdx || EdgeIdxOfPositions[ParticleIdx + 1] == EdgeIdx)
+						if (EdgeIdxOfPositions[0] == EdgeIdx || EdgeIdxOfPositions[1] == EdgeIdx)
 						{
 							continue;
 						}
@@ -1298,10 +1298,10 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
 						// Triangleの辺にエッジがある場合に交差を検出失敗する。
 						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
-						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx + 1);
-						Positions.Insert(NearestIntersectPoint, ParticleIdx + 1);
-						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx + 1);
-						MovedFlagOfPositions.Insert(true, ParticleIdx + 1); // ここでtrueにしてもパーティクルループの自分の番のMovementPhaseで別途判定される
+						PrevPositions.Insert(NearestIntersectPoint, 1);
+						Positions.Insert(NearestIntersectPoint, 1);
+						EdgeIdxOfPositions.Insert(NearestEdgeIdx, 1);
+						MovedFlagOfPositions.Insert(true, 1); // ここでtrueにしてもパーティクルループの自分の番のMovementPhaseで別途判定される
 
 						bParticleIdxLoopAgain = true;
 					}
@@ -1426,14 +1426,14 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 				else if (ParticleIdx == (Positions.Num() - 1))
 				{
 					// 動いている頂点
-					const FVector& TriVert1 = Positions[ParticleIdx];
-					const FVector& TriVert2 = PrevPositions[ParticleIdx];
+					const FVector& TriVert1 = Positions[Positions.Num() - 1];
+					const FVector& TriVert2 = PrevPositions[Positions.Num() - 1];
 					
 					// 固定している頂点は始点の判定と違ってPrevPositonsでなくPositionsなのに注意。
 					// こうしないと1フレームでParticlesIdxの頂点が大きく動いたとき交差検出が漏れるケースがある
 					// https://www.gdcvault.com/play/1027351/Rope-Simulation-in-Uncharted-4
 					// の32分ごろの例。
-					const FVector& TriVert0 = Positions[ParticleIdx - 1];
+					const FVector& TriVert0 = Positions[Positions.Num() - 2];
 
 					// TODO: 上のifブロックと処理が冗長
 					double NearestEdgeDistanceSq = DBL_MAX;
@@ -1442,7 +1442,7 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 					for (int32 EdgeIdx = 0; EdgeIdx < RopeBlockerTriMeshEdgeArray.Num(); EdgeIdx++)
 					{
 						// 異なるエッジでないものは採用しない
-						if (EdgeIdxOfPositions[ParticleIdx - 1] == EdgeIdx || EdgeIdxOfPositions[ParticleIdx] == EdgeIdx)
+						if (EdgeIdxOfPositions[Positions.Num() - 2] == EdgeIdx || EdgeIdxOfPositions[Positions.Num() - 1] == EdgeIdx)
 						{
 							continue;
 						}
@@ -1477,10 +1477,10 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 						// シェイプだと、同一平面上のエッジを拾い損ねることがFMath::SegmentTriangleIntersection()では簡単に起きる。
 						// Triangleの辺にエッジがある場合に交差を検出失敗する。
 						// よってPrevPositionsの更新は頂点の追加が終わるまでしない
-						PrevPositions.Insert(NearestIntersectPoint, ParticleIdx);
-						Positions.Insert(NearestIntersectPoint, ParticleIdx);
-						EdgeIdxOfPositions.Insert(NearestEdgeIdx, ParticleIdx);
-						MovedFlagOfPositions.Insert(true, ParticleIdx); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
+						PrevPositions.Insert(NearestIntersectPoint, Positions.Num() - 1);
+						Positions.Insert(NearestIntersectPoint, Positions.Num() - 1);
+						EdgeIdxOfPositions.Insert(NearestEdgeIdx, Positions.Num() - 1);
+						MovedFlagOfPositions.Insert(true, Positions.Num() - 1); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
 						bParticleIdxLoopAgain = true;
 					}
 
