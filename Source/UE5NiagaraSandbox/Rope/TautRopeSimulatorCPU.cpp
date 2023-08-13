@@ -2160,6 +2160,8 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 								// TODO:OuterCornerEdges内のソートが必要。現状の実装で正確に動作するのはOuterCornerがひとつのときだけ
 								check(OuterCornerEdges.Num() >= 2);
 
+								int32 NumAdded = 0;
+
 								int32 PreParticleEdgeIdx = EdgeIdxOfPositions[ParticleIdx - 1];
 								int32 PostParticleEdgeIdx = EdgeIdxOfPositions[ParticleIdx + 1];
 								if (PreParticleEdgeIdx == OuterCornerEdges[0]
@@ -2170,6 +2172,8 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 									Positions.RemoveAt(ParticleIdx);
 									EdgeIdxOfPositions.RemoveAt(ParticleIdx);
 									MovedFlagOfPositions.RemoveAt(ParticleIdx);
+
+									NumAdded = -1;
 
 									// TODO:同じParticleIdxでループしたいからだが、変数名変えよう
 									bParticleIdxLoopAgain = true;
@@ -2187,11 +2191,13 @@ void ATautRopeSimulatorCPU::SolveRopeBlockersCollisionConstraint()
 									if (PreParticleEdgeIdx != OuterCornerEdges[i]
 										&& PostParticleEdgeIdx != OuterCornerEdges[i]) //TODO:こんな分岐で処理するのも雑。仮実装。
 									{
-										PrevPositions.Insert(Positions[ParticleIdx], ParticleIdx + i);
+										PrevPositions.Insert(Positions[ParticleIdx], ParticleIdx + NumAdded + 1);
 										// PositionsにPositionsの要素をInsertするとTArrayの内部でチェックにひっかかるので
-										Positions.Insert(FVector(Positions[ParticleIdx]), ParticleIdx + i); 
-										EdgeIdxOfPositions.Insert(OuterCornerEdges[i], ParticleIdx + i);
-										MovedFlagOfPositions.Insert(true, ParticleIdx + i); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
+										Positions.Insert(FVector(Positions[ParticleIdx]), ParticleIdx + NumAdded + 1); 
+										EdgeIdxOfPositions.Insert(OuterCornerEdges[i], ParticleIdx + NumAdded + 1);
+										MovedFlagOfPositions.Insert(true, ParticleIdx + NumAdded + 1); // ここでtrueにして次イテレーションで最短コンストレイントを行う // TODO:逆順ループを作れば次イテレーションにしなくてもよくなり収束も早くなるかも
+
+										NumAdded++;
 
 										bParticleIdxLoopAgain = true;
 									}
