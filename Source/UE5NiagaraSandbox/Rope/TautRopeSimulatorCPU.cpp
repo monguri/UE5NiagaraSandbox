@@ -10,6 +10,7 @@
 #include "Async/ParallelFor.h"
 #include "Chaos/TriangleMeshImplicitObject.h"
 #include "DrawDebugHelpers.h"
+#include "PhysicsEngine/BodySetup.h"
 
 void ATautRopeSimulatorCPU::BeginPlay()
 {

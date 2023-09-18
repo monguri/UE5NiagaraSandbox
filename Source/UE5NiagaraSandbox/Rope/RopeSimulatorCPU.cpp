@@ -10,6 +10,7 @@
 #include "Async/ParallelFor.h"
 #include "Chaos/Convex.h"
 #include "PhysicsInterfaceTypesCore.h"
+#include "PhysicsEngine/BodySetup.h"
 
 void ARopeSimulatorCPU::PreInitializeComponents()
 {
@@ -50,9 +51,9 @@ void ARopeSimulatorCPU::PreInitializeComponents()
 
 	// Tick()で設定しても、レベルにNiagaraSystemが最初から配置されていると、初回のスポーンでは配列は初期値を使ってしまい
 	//間に合わないのでBeginPlay()でも設定する
-	NiagaraComponent->SetNiagaraVariableInt("NumParticles", NumParticles);
-	NiagaraComponent->SetNiagaraVariableInt("Shape", 0);
-	NiagaraComponent->SetNiagaraVariableVec3("MeshScale", FVector(MeshScale));
+	NiagaraComponent->SetVariableInt(FName("NumParticles"), NumParticles);
+	NiagaraComponent->SetVariableInt(FName("Shape"), 0);
+	NiagaraComponent->SetVariableVec3(FName("MeshScale"), FVector(MeshScale));
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayVector(NiagaraComponent, FName("Positions"), Positions);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayQuat(NiagaraComponent, FName("Orientations"), Orientations);
 	UNiagaraDataInterfaceArrayFunctionLibrary::SetNiagaraArrayColor(NiagaraComponent, FName("Colors"), Colors);
