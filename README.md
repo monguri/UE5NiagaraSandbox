@@ -1,5 +1,6 @@
 # UE5NiagaraSandbox
 My UE5 sandbox project to test GPGPU, Niagara, Physics or etc. 
+The asssets from UE4 third person template are under the liscense of EPIC Games.
 
 ## Taut Rope Simulation
 Play TautRopeSimulatorCPUTest_ThirdPerson level.
